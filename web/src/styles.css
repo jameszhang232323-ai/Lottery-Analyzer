@@ -1,0 +1,257 @@
+:root {
+  --color-bg: #f6f7f9;
+  --color-surface: #ffffff;
+  --color-border: #e2e5ea;
+  --color-text: #1f2430;
+  --color-muted: #6b7280;
+  --color-accent: #b3261e;
+  --color-blue-ball: #1c64b3;
+  --color-ok: #16794a;
+  --color-warn: #a15c00;
+  --color-error: #b3261e;
+  --radius: 10px;
+  --shadow: 0 1px 2px rgb(16 24 40 / 6%), 0 4px 12px rgb(16 24 40 / 4%);
+  font-family: system-ui, -apple-system, 'Segoe UI', 'Microsoft YaHei', sans-serif;
+  color: var(--color-text);
+  background: var(--color-bg);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  background: var(--color-bg);
+}
+
+.app-shell {
+  display: flex;
+  min-height: 100vh;
+  flex-direction: column;
+}
+
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 24px;
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.brand {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.brand-name {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+
+.brand-sub {
+  color: var(--color-muted);
+  font-size: 13px;
+}
+
+.global-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--color-muted);
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-muted);
+}
+
+.status-dot[data-status='ok'] {
+  background: var(--color-ok);
+}
+
+.status-dot[data-status='error'] {
+  background: var(--color-error);
+}
+
+.status-dot[data-status='loading'] {
+  background: var(--color-warn);
+}
+
+.app-body {
+  display: flex;
+  flex: 1;
+  align-items: flex-start;
+  gap: 20px;
+  padding: 20px 24px;
+}
+
+.app-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 168px;
+  padding: 8px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  position: sticky;
+  top: 76px;
+}
+
+.nav-link {
+  padding: 9px 12px;
+  border-radius: 8px;
+  color: var(--color-text);
+  text-decoration: none;
+  font-size: 14px;
+}
+
+.nav-link:hover {
+  background: #f0f2f5;
+}
+
+.nav-link-active {
+  background: #fdecea;
+  color: var(--color-accent);
+  font-weight: 600;
+}
+
+.app-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.view-header {
+  margin-bottom: 16px;
+}
+
+.view-header h1 {
+  margin: 0 0 4px;
+  font-size: 22px;
+}
+
+.view-subtitle {
+  margin: 0;
+  color: var(--color-muted);
+  font-size: 13px;
+}
+
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 16px;
+}
+
+.panel,
+.empty-state {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 16px 18px;
+  margin-bottom: 16px;
+}
+
+.empty-state h2,
+.panel h2 {
+  margin: 0 0 8px;
+  font-size: 15px;
+}
+
+.empty-state p {
+  margin: 0 0 6px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: #3b4250;
+}
+
+.empty-hint {
+  color: var(--color-muted) !important;
+  font-size: 12px !important;
+}
+
+.plain-list {
+  margin: 0;
+  padding-left: 18px;
+  color: #3b4250;
+  font-size: 13px;
+  line-height: 1.9;
+}
+
+.muted {
+  color: var(--color-muted);
+  font-size: 12px;
+}
+
+.kv {
+  display: grid;
+  grid-template-columns: 88px 1fr;
+  gap: 6px 12px;
+  margin: 0 0 12px;
+  font-size: 13px;
+}
+
+.kv dt {
+  color: var(--color-muted);
+}
+
+.kv dd {
+  margin: 0;
+  word-break: break-all;
+}
+
+.ghost-button {
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text);
+  border-radius: 8px;
+  padding: 5px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.ghost-button:hover {
+  background: #f0f2f5;
+}
+
+.app-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 24px;
+  border-top: 1px solid var(--color-border);
+  color: var(--color-muted);
+  font-size: 12px;
+  background: var(--color-surface);
+}
+
+@media (max-width: 900px) {
+  .app-body {
+    flex-direction: column;
+    padding: 12px;
+  }
+
+  .app-nav {
+    flex-direction: row;
+    overflow-x: auto;
+    position: static;
+    width: 100%;
+  }
+
+  .app-footer {
+    flex-direction: column;
+  }
+}

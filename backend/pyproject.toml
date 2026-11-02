@@ -1,0 +1,49 @@
+[build-system]
+requires = ["hatchling>=1.26"]
+build-backend = "hatchling.build"
+
+[project]
+name = "dajidali"
+version = "0.1.0"
+description = "大吉大利 福彩数据分析工作台（B/S 版后端）"
+readme = { text = "大吉大利 B/S 版后端：FastAPI + 独立 Python 计算核心。", content-type = "text/plain" }
+requires-python = ">=3.12"
+license = { text = "Proprietary" }
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.32",
+  "pydantic>=2.9",
+  "pydantic-settings>=2.6",
+  "sqlalchemy>=2.0.36",
+  "alembic>=1.14",
+  "httpx>=0.27",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3",
+  "pytest-asyncio>=0.24",
+  "ruff>=0.8",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/dajidali"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/dajidali", "tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+# 本机沙箱禁止 Python 创建 0700 临时目录，pytest 缓存会告警，先关闭缓存插件。
+addopts = "-q -p no:cacheprovider"
+asyncio_default_fixture_loop_scope = "function"

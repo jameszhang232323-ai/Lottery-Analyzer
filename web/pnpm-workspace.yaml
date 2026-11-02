@@ -1,0 +1,13 @@
+# pnpm 11 起，依赖与构建设置放在这个文件（package.json 的 pnpm 字段已不再读取）。
+# 键名必须使用 camelCase，否则会被忽略。
+
+# 扁平 node_modules：避免 pnpm 严格布局下 estree-walker 等 ESM-only 包被 CJS 依赖误解析。
+nodeLinker: hoisted
+
+# 只允许确实需要执行安装脚本的依赖，其他依赖保持默认拒绝。
+onlyBuiltDependencies:
+  - esbuild
+  - vue-demi
+
+# 依赖已安装时，运行脚本前不再强制校验安装结果（本机沙箱下 vue-demi 安装脚本被拒绝）。
+verifyDepsBeforeRun: false
