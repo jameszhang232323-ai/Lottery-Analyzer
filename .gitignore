@@ -16,6 +16,7 @@ dist/
 # ---- 本地工作目录 ----
 .tmp/
 .pnpm-store/
+.test-tmp/
 /pip-*/
 /tmp????????
 /tooling/probe_tmp.py
