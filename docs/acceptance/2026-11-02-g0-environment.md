@@ -3,7 +3,7 @@
 对应《B/S 版实施计划》任务 00 的“检查工作区、Python 虚拟环境、Node 构建工具、Windows 运行条件”，
 以及任务 01 的工程骨架。**本记录只覆盖本机开发环境，不含数据源许可、AI 账号与服务器部署验收。**
 
-状态：本机开发环境可用；后端与前端骨架可构建、可测试；GitHub 仓库已存在但尚未推送。
+状态：本机开发环境可用；后端测试与静态检查通过，前端类型检查与生产构建通过，初始提交已推送到 GitHub `main` 分支。
 
 ## 一、机器与工具链
 
@@ -16,7 +16,7 @@
 | Node.js | v24.21.0（DSH 自带运行时） | 计划原写“开发构建需要 Node.js”，未锁定具体大版本 |
 | pnpm | 11.28.5（DSH 自带运行时） | 通过 `node <pnpm.mjs>` 调用，避免 PowerShell 执行策略拦截 |
 | Git | 2.55.0.windows.3 | |
-| GitHub CLI | 已安装，**未登录** | 推送需要先 `gh auth login` 或配置凭据 |
+| GitHub CLI | 已安装，未登录 | 推送改用系统凭据管理器（Git Credential Manager）成功 |
 | Docker | 未安装 | 服务器 Compose 验收阶段再装 |
 | 网络 | 可访问 registry.npmjs.org 与 pypi.org | PowerShell `Invoke-WebRequest` 失败是 TLS 后端问题，Python/Node 正常 |
 
@@ -34,6 +34,7 @@
 | 单元 + 契约测试 | `python -m pytest` | **25 passed** |
 | 静态检查 | `python -m ruff check src tests` | **All checks passed** |
 | 应用装配 | `GET /api/v1/health/live`、`/health/ready`、`/games` | 通过（TestClient 覆盖） |
+| 真实进程 | uvicorn 监听 `127.0.0.1:8010`，请求 `/health/live` 与 `/games` | 均返回 200 |
 | OpenAPI | `GET /api/v1/openapi.json` | 通过，标题“大吉大利 API” |
 
 已实现（骨架级）：不可变领域对象 `SsqNumbers` / `Fc3dNumbers` / `DrawRevision`、
