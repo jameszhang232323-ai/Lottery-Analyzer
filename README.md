@@ -56,6 +56,14 @@ pnpm typecheck
 pnpm build
 ```
 
+### 集成验收与并行开发
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tooling/check.ps1   # ruff + pytest + typecheck + build + 单测
+```
+
+并行波次、文件所有权和可复制到独立会话的任务说明见[并行开发编排](docs/plans/2026-11-02-parallel-development.md)。
+
 ## 约定
 
 - 浏览器只调用 `/api/v1`，不直连数据库、数据源与 AI 服务。
