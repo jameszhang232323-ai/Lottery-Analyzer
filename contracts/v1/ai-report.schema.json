@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dajidali.local/contracts/v1/ai-report.schema.json",
+  "title": "AiReportV1",
+  "description": "AI 结构化输出。只能引用事实 ID 与白名单参数；号码与命中成绩一律由引擎给出，AI 不得自行编造。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "request_id", "snapshot_hash", "observations", "strategy_proposals", "limitations"],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "request_id": { "type": "string", "minLength": 1 },
+    "snapshot_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "observations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["fact_ids", "interpretation"],
+        "properties": {
+          "fact_ids": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string", "pattern": "^ssq\\.[a-z0-9_.]+$" }
+          },
+          "interpretation": { "type": "string", "minLength": 1, "maxLength": 1000 }
+        }
+      }
+    },
+    "strategy_proposals": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["strategy_type", "validation_status"],
+        "properties": {
+          "strategy_type": { "enum": ["S0", "S1"] },
+          "window": { "oneOf": [{ "enum": [30, 100, 300] }, { "const": "all" }, { "type": "null" }] },
+          "alpha_periods": { "oneOf": [{ "enum": [10, 30, 100] }, { "type": "null" }] },
+          "lambda": { "oneOf": [{ "enum": [0, 0.1, 0.25] }, { "type": "null" }] },
+          "conditions": {
+            "type": ["object", "null"],
+            "description": "只接受预定义结构条件；禁止 SQL、脚本、任意 URL 与文件路径。"
+          },
+          "reason_fact_ids": {
+            "type": "array",
+            "items": { "type": "string", "pattern": "^ssq\\.[a-z0-9_.]+$" }
+          },
+          "validation_status": { "const": "proposed" }
+        },
+        "allOf": [
+          {
+            "if": { "properties": { "strategy_type": { "const": "S0" } }, "required": ["strategy_type"] },
+            "then": {
+              "properties": {
+                "window": { "type": "null" },
+                "alpha_periods": { "type": "null" },
+                "lambda": { "type": "null" }
+              }
+            }
+          },
+          {
+            "if": { "properties": { "strategy_type": { "const": "S1" } }, "required": ["strategy_type"] },
+            "then": { "required": ["window", "alpha_periods", "lambda"] }
+          }
+        ]
+      }
+    },
+    "limitations": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    }
+  }
+}

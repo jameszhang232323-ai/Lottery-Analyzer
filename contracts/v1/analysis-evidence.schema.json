@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dajidali.local/contracts/v1/analysis-evidence.schema.json",
+  "title": "AnalysisEvidenceV1",
+  "description": "发送给 AI 的输入资料包。只含统计摘要与所需证据，不含凭证、本地路径、完整数据库或未选择的个人备注。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "request_id",
+    "game",
+    "snapshot_hash",
+    "as_of_issue",
+    "sample_n",
+    "quality",
+    "windows",
+    "facts",
+    "question",
+    "allowed_strategy_types"
+  ],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "request_id": { "type": "string", "minLength": 1 },
+    "game": { "enum": ["ssq"] },
+    "snapshot_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "as_of_issue": { "type": "string", "pattern": "^[0-9]{5,}$" },
+    "sample_n": { "type": "integer", "minimum": 0 },
+    "quality": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["effective_n", "missing", "conflicts", "verification"],
+      "properties": {
+        "effective_n": { "type": "integer", "minimum": 0 },
+        "missing": { "type": "integer", "minimum": 0 },
+        "conflicts": { "type": "integer", "minimum": 0 },
+        "verification": { "enum": ["structural", "cross_source", "official"] }
+      }
+    },
+    "windows": {
+      "type": "array",
+      "items": { "oneOf": [{ "enum": [30, 100, 300] }, { "const": "all" }] }
+    },
+    "facts": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["fact_id", "value", "unit", "sample_n", "metric_version"],
+        "properties": {
+          "fact_id": { "type": "string", "pattern": "^ssq\\.[a-z0-9_.]+$" },
+          "value": { "type": ["number", "integer", "null"] },
+          "unit": { "enum": ["draws", "fraction", "count", "sum", "span", "pairs"] },
+          "sample_n": { "type": "integer", "minimum": 0 },
+          "window": { "oneOf": [{ "enum": [30, 100, 300] }, { "const": "all" }, { "type": "null" }] },
+          "metric_version": { "type": "string" }
+        }
+      }
+    },
+    "completed_backtests": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "已完成回测的 run_id；AI 只能引用，不能声称未回测的策略已验证。"
+    },
+    "question": { "type": "string", "minLength": 1, "maxLength": 2000 },
+    "allowed_strategy_types": {
+      "type": "array",
+      "items": { "enum": ["S0", "S1"] },
+      "minItems": 1
+    }
+  }
+}

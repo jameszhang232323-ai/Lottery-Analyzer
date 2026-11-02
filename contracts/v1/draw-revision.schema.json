@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dajidali.local/contracts/v1/draw-revision.schema.json",
+  "title": "DrawRevisionV1",
+  "description": "一期开奖的某一次修订。修订号单调递增，(game, issue, revision) 唯一；更正只新增修订，不覆盖旧修订。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "game", "issue", "revision", "draw_date", "numbers"],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "game": { "enum": ["ssq", "fc3d"] },
+    "issue": {
+      "type": "string",
+      "pattern": "^[0-9]{5,}$",
+      "description": "期号保存为字符串，排序按年份与序号，不做整数比较。"
+    },
+    "revision": { "type": "integer", "minimum": 1 },
+    "draw_date": { "type": "string", "format": "date" },
+    "numbers": {
+      "oneOf": [
+        { "$ref": "#/$defs/ssqNumbers" },
+        { "$ref": "#/$defs/fc3dNumbers" }
+      ]
+    },
+    "drawn_order": {
+      "type": ["array", "null"],
+      "items": { "type": "integer", "minimum": 1, "maximum": 33 },
+      "description": "若来源提供真实摇出顺序则单独保存；不得把排序后的红球当作摇出顺序。"
+    },
+    "quality": {
+      "type": "string",
+      "enum": ["structural", "cross_source", "official", "disputed"],
+      "default": "structural",
+      "description": "结构通过、跨源一致、官方核对是独立证据，不互相伪装。"
+    },
+    "rule_version": { "type": ["string", "null"] },
+    "mode": {
+      "type": ["string", "null"],
+      "description": "特别规定状态（如福运奖是否启用）；未知时为 null，不猜测金额。"
+    },
+    "is_current": { "type": "boolean", "default": true }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "game": { "const": "ssq" } }, "required": ["game"] },
+      "then": { "properties": { "numbers": { "$ref": "#/$defs/ssqNumbers" } } }
+    },
+    {
+      "if": { "properties": { "game": { "const": "fc3d" } }, "required": ["game"] },
+      "then": { "properties": { "numbers": { "$ref": "#/$defs/fc3dNumbers" } } }
+    }
+  ],
+  "$defs": {
+    "ssqNumbers": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["red", "blue"],
+      "properties": {
+        "red": {
+          "type": "array",
+          "minItems": 6,
+          "maxItems": 6,
+          "uniqueItems": true,
+          "items": { "type": "integer", "minimum": 1, "maximum": 33 },
+          "description": "升序保存的 6 个互异红球。"
+        },
+        "blue": { "type": "integer", "minimum": 1, "maximum": 16 }
+      }
+    },
+    "fc3dNumbers": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["digits"],
+      "properties": {
+        "digits": {
+          "type": "string",
+          "pattern": "^[0-9]{3}$",
+          "description": "固定三位字符串，允许重复与前导零，例如 007。"
+        }
+      }
+    }
+  }
+}
