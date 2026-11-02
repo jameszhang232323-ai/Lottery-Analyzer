@@ -84,7 +84,7 @@ def test_upgrade_head_creates_all_tables(monkeypatch) -> None:
                 version = connection.execute(
                     text("select version_num from alembic_version")
                 ).scalar_one()
-                assert version == "0001"
+                assert version == "0002"
                 games = connection.execute(
                     text("select code, enabled from lottery_game order by code")
                 ).all()

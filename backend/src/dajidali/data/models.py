@@ -27,6 +27,7 @@ from sqlalchemy import (
     ForeignKeyConstraint,
     Index,
     Integer,
+    LargeBinary,
     String,
     Text,
     UniqueConstraint,
@@ -439,6 +440,8 @@ class UserSession(Base):
         nullable=False,
     )
     token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    # 与令牌绑定的一次性 CSRF 值；登录时生成，随非 HttpOnly Cookie 下发。
+    csrf_token: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, default=utc_now)
     expires_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False)
     revoked_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
@@ -558,6 +561,37 @@ class Artifact(Base):
     sha256: Mapped[str] = mapped_column(String(64), nullable=False)
     storage_path: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, default=utc_now)
+
+
+class SecretReference(Base):
+    """服务密钥引用：只保存认证加密的密文与掩码，明文绝不入库。
+
+    ``owner_id`` 为空表示组织级全局密钥；否则归属指定用户。解密主密钥不落库，
+    由部署环境（``DAJIDALI_MASTER_KEY``）注入，见 :mod:`dajidali.security.secrets`。
+    """
+
+    __tablename__ = "secret_reference"
+    __table_args__ = (
+        UniqueConstraint("owner_id", "name", name="uq_secret_reference_owner_name"),
+        CheckConstraint("key_version >= 1", name="ck_secret_reference_key_version"),
+        Index("ix_secret_reference_owner", "owner_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    owner_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("user.id", name="fk_secret_reference_owner", ondelete="CASCADE"),
+        nullable=True,
+    )
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    ciphertext: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    nonce: Mapped[bytes] = mapped_column(LargeBinary(12), nullable=False)
+    key_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    masked_hint: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        UTCDateTime, nullable=False, default=utc_now, onupdate=utc_now
+    )
 
 
 def seed_default_games(session: Session) -> None:

@@ -10,27 +10,38 @@ import uuid
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from fastapi import FastAPI, Request, Response
+from fastapi import Depends, FastAPI, Request, Response
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
+from sqlalchemy.engine import Engine
 
 from dajidali import __version__
+from dajidali.api.deps import install_session_factory
 from dajidali.api.errors import ErrorBody, error_response
+from dajidali.api.routes import admin_router, auth_router, resource_router
 from dajidali.domain.errors import DomainError
+from dajidali.security.csrf import verify_csrf
 
 API_PREFIX = "/api/v1"
 REQUEST_ID_HEADER = "X-Request-ID"
 
 
-def create_app() -> FastAPI:
-    """创建应用实例。测试与部署共用同一工厂，避免导入期副作用。"""
+def create_app(engine: Engine | None = None) -> FastAPI:
+    """创建应用实例。测试与部署共用同一工厂，避免导入期副作用。
+
+    ``engine`` 允许测试注入临时 SQLite 引擎；未注入时按 ``DATABASE_URL``
+    创建，与迁移/worker 使用同一配置入口。
+    """
     app = FastAPI(
         title="大吉大利 API",
         version=__version__,
         docs_url=f"{API_PREFIX}/docs",
         redoc_url=None,
         openapi_url=f"{API_PREFIX}/openapi.json",
+        # 所有非安全方法统一做会话绑定 CSRF 校验；登录接口在未登录时不受影响。
+        dependencies=[Depends(verify_csrf)],
     )
+    install_session_factory(app, engine)
 
     @app.middleware("http")
     async def attach_request_id(
@@ -97,6 +108,10 @@ def create_app() -> FastAPI:
                 },
             ]
         }
+
+    app.include_router(auth_router, prefix=API_PREFIX)
+    app.include_router(admin_router, prefix=API_PREFIX)
+    app.include_router(resource_router, prefix=API_PREFIX)
 
     return app
 
