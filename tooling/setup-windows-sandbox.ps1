@@ -1,4 +1,4 @@
-# 本机开发环境补丁：只做两件事，都能用 `git config --unset` 或删除文件撤销。
+﻿# 本机开发环境补丁：只做两件事，都能用 `git config --unset` 或删除文件撤销。
 #
 # 1. 让 Python 在受限沙箱里使用临时目录（pip、pytest 缓存等）。
 # 2. 让 Git 在受限沙箱里用 OpenSSL 而不是 schannel 建立 TLS 连接（只影响读取操作）。
