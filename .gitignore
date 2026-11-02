@@ -17,10 +17,6 @@ dist/
 .tmp/
 .pnpm-store/
 .test-tmp/
-/pip-*/
-/tmp????????
-/tooling/probe_tmp.py
-/tooling/probe_mkdir.py
 
 # ---- Node ----
 node_modules/
@@ -37,10 +33,11 @@ npm-debug.log*
 *.pem
 *.key
 
-# ---- 运行时数据（不进版本库） ----
-data/
-artifacts/
-backups/
+# ---- 运行时数据 ----
+# 只锚定仓库根目录：否则会误伤 backend/src/dajidali/data 这个源码包。
+/data/
+/artifacts/
+/backups/
 *.db
 *.db-wal
 *.db-shm
