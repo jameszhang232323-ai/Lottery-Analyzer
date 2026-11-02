@@ -44,6 +44,5 @@ ignore = ["E501"]
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
-# 本机沙箱禁止 Python 创建 0700 临时目录，pytest 缓存会告警，先关闭缓存插件。
-addopts = "-q -p no:cacheprovider"
+addopts = "-q"
 asyncio_default_fixture_loop_scope = "function"

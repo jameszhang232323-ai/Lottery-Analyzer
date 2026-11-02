@@ -55,21 +55,42 @@
 | 类型检查 | `pnpm typecheck`（vue-tsc 3.3.14） | **通过** |
 | 生产构建 | `pnpm build` | **通过**：50 个模块，`dist/index.html` + JS 106.8 kB（gzip 42.1 kB）+ CSS 3.3 kB |
 
-## 四、本机环境的已知限制（不影响服务器部署，但影响本机开发体验）
+## 四、本机沙箱限制与解除方式
 
-1. **沙箱无法创建 0700 临时目录**：DSH 沙箱下 Python 调用 `tempfile.mkdtemp`（内部以 `mode=0o700` 建目录）
-   写入时报 `PermissionError(13)`。受影响的是 pip/venv 安装、pytest 缓存、任何依赖系统临时目录的库。
-   处理：依赖安装与需要临时目录的命令在**放宽沙箱的一次性授权**下执行；测试本身不创建临时目录，可正常在沙箱内运行。
-2. **PowerShell 执行策略为 Restricted**：`npm.ps1` 等脚本无法直接运行。处理：使用 `npm.cmd` 或 DSH 自带
-   `node.exe + pnpm.mjs`；脚本可用 `Set-ExecutionPolicy -Scope Process Bypass` 临时放行。
-3. **pytest 缓存关闭**：因限制 1，`pyproject.toml` 使用 `-p no:cacheprovider`；`--lf`/`--ff` 暂不可用。
-4. **Vite 构建需要放宽沙箱**：Vite 在 Windows 上会执行 `net use` 探测网络驱动器，沙箱禁止带管道的子进程
-   （`spawn EPERM`），因此 `pnpm build` 在学习环境里必须一次性放宽权限；`pnpm typecheck` 与 `pnpm dev` 不受影响。
-5. **pnpm 依赖脚本策略**：`vue-demi` 的安装脚本被 pnpm 拒绝，`pnpm install` 以退出码 1 结束，但
+下面三条限制来自同一个原因：DSH 的 `workspace-write` 沙箱（Windows 上以受限身份执行命令）。
+**这不是 Windows 文件权限问题**，改目录权限或换管理员账户都不能解决；要彻底消除只能切换 DSH 的权限预设。
+
+### 4.1 彻底解除（三条同时生效）
+
+| 层级 | 操作 | 生效范围 |
+|---|---|---|
+| 当前会话 | 在会话的「权限 / Permissions」选择器里切到 `danger-full-access`（完全访问） | 立即生效；沙箱关闭、审批改为 never |
+| 以后新建的会话 | 设置 → 权限，把默认预设改为 `danger-full-access`（保存为 `defaultPreset`） | 只影响之后创建的会话，不改当前会话 |
+| 启动层 | 启动 DSH 前设置环境变量 `DSH_PERMISSION_MODE=danger-full-access` | 该进程内新建会话的默认值 |
+
+代价：文件、网络、子进程都不再受限，命令来源必须可信。这是 DSH 设计上唯一的“真正解除”开关。
+
+### 4.2 保留沙箱时的替代方案（均已实测）
+
+| 限制 | 现象 | 替代方案 | 实测结果 |
+|---|---|---|---|
+| Python 临时目录 | `tempfile.mkdtemp` 以 0700 建目录，沙箱拒绝写入，`pip install` 与 pytest 缓存失败 | 运行 `tooling/setup-windows-sandbox.ps1`，把 `sitecustomize.py` 装进虚拟环境，改用默认权限建临时目录 | 沙箱内 `pip install/uninstall`、pytest（含缓存）均通过 |
+| 前端构建 | Vite 在 Windows 上执行 `net use` 探测网络盘，沙箱禁止带管道的子进程（`spawn EPERM`） | `package.json` 的 build 改为 `vite build --configLoader native` | 沙箱内 `pnpm build` 通过（50 模块） |
+| Git 访问远端 | schannel 在受限身份下取不到 TLS 凭据（`SEC_E_NO_CREDENTIALS`） | `git config --local http.sslBackend openssl`（`setup-windows-sandbox.ps1` 会设置） | 沙箱内 `ls-remote` / `fetch` 可用 |
+| Git 推送 | 凭据助手需要命名对象，沙箱内报 `NtCreateDirectoryObject ... 0xC0000022` | 无配置解法；推送时切 `danger-full-access`，或改用文件型凭据（`credential.helper=store`，需自行评估 token 落盘风险） | 本次推送均使用一次性放宽 |
+
+与沙箱无关、属于本机配置的两项：
+
+1. **PowerShell 执行策略为 Restricted**：`.ps1`（含 `npm.ps1`）不能直接运行。用 `npm.cmd` 或 DSH 自带的
+   `node.exe + pnpm.mjs`；脚本用 `Set-ExecutionPolicy -Scope Process Bypass` 临时放行（本次安装补丁即用此法）。
+2. **pnpm 依赖脚本策略**：`vue-demi` 的安装脚本被 pnpm 拒绝，`pnpm install` 以退出码 1 结束，但
    `node_modules/vue-demi/lib` 已就绪，类型检查与构建均通过。依赖使用扁平布局（`nodeLinker: hoisted`），
    否则 `vue-tsc` 会因 `estree-walker` 的 ESM-only 导出解析失败（`ERR_PACKAGE_PATH_NOT_EXPORTED`）。
-6. **工作区写权限**：初次进入时目录缺少写入所需权限，已用 DSH 权限诊断脚本修复（备份与恢复命令见
-   `D:\codex project\福彩分析-acl-recovery`）。该目录在工作区外，不属于仓库内容。
+
+### 4.3 工作区写权限
+
+初次进入时工作区目录缺少写入所需权限，已用 DSH 权限诊断脚本修复（备份与恢复命令在
+`D:\codex project\福彩分析-acl-recovery`，该目录在工作区外，不属于仓库内容）。
 
 ## 五、尚未验证（G0 其余门槛）
 

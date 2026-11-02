@@ -43,6 +43,9 @@ backend\.venv\Scripts\python.exe -m ruff check backend/src backend/tests
 
 健康检查：`GET /api/v1/health/live`、`GET /api/v1/health/ready`。
 
+> 在 DSH 的 Windows 沙箱里工作？先运行一次 `powershell -ExecutionPolicy Bypass -File tooling/setup-windows-sandbox.ps1`，
+> 它会修好 Python 临时目录和 Git TLS 两个本机限制；完整说明见[环境验收记录](docs/acceptance/2026-11-02-g0-environment.md)。
+
 ### 前端
 
 ```powershell
