@@ -17,6 +17,7 @@ from pathlib import Path
 import pytest
 from alembic import command
 from alembic.config import Config
+from alembic.script import ScriptDirectory
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import inspect, select, text
@@ -302,6 +303,13 @@ def make_alembic_config(db_path: Path) -> Config:
     return config
 
 
+def expected_head(config: Config) -> str:
+    """迁移目录当前 head；后续新增迁移不需要改这里的断言。"""
+    head = ScriptDirectory.from_config(config).get_current_head()
+    assert head is not None
+    return head
+
+
 def test_migration_0002_upgrade_and_downgrade(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -320,7 +328,7 @@ def test_migration_0002_upgrade_and_downgrade(
                 version = connection.execute(
                     text("SELECT version_num FROM alembic_version")
                 ).scalar_one()
-            assert version == "0002"
+            assert version == expected_head(config)
         finally:
             engine.dispose()
 
