@@ -3,11 +3,18 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   API_BASE,
   ApiError,
+  apiDownload,
   apiGet,
   apiPost,
+  clientError,
+  csrfTokenFrom,
+  filenameFromDisposition,
   mapErrorResponse,
   mapNetworkError,
+  readCookieValue,
+  setUnauthorizedHandler,
   toApiError,
+  withQuery,
 } from '../src/api/client'
 
 afterEach(() => {
@@ -182,5 +189,132 @@ describe('apiGet / apiPost', () => {
       code: 'UNEXPECTED_RESPONSE',
       kind: 'unexpected',
     })
+  })
+})
+
+describe('Cookie、CSRF 与本地输入错误', () => {
+  it('从 Cookie 头读取指定值，不把缺失当成空字符串令牌', () => {
+    expect(readCookieValue('a=1; dajidali_csrf=token-abc; b=2', 'dajidali_csrf')).toBe('token-abc')
+    expect(readCookieValue('a=1', 'dajidali_csrf')).toBe('')
+    expect(csrfTokenFrom('a=1')).toBeNull()
+    expect(csrfTokenFrom(null)).toBeNull()
+    expect(csrfTokenFrom('dajidali_csrf=abc123')).toBe('abc123')
+  })
+
+  it('POST 自动附带 X-CSRF-Token；GET 不附带', async () => {
+    vi.stubGlobal('document', { cookie: 'dajidali_csrf=csrf-token' })
+    const fetchMock = vi.fn(async () => jsonResponse({ ok: true }, 200))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await apiPost('/snapshots', { game: 'ssq' })
+    await apiGet('/draws')
+
+    const postInit = fetchMock.mock.calls[0]?.[1] as RequestInit
+    const getInit = fetchMock.mock.calls[1]?.[1] as RequestInit
+    expect(new Headers(postInit.headers).get('X-CSRF-Token')).toBe('csrf-token')
+    expect(new Headers(getInit.headers).get('X-CSRF-Token')).toBeNull()
+  })
+
+  it('没有 CSRF Cookie 时不发送空请求头', async () => {
+    vi.stubGlobal('document', { cookie: '' })
+    const fetchMock = vi.fn(async () => jsonResponse({ ok: true }, 200))
+    vi.stubGlobal('fetch', fetchMock)
+    await apiPost('/auth/login', { username: 'a', password: 'b' })
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit
+    expect(new Headers(init.headers).get('X-CSRF-Token')).toBeNull()
+  })
+
+  it('401 通知全局处理器并保留后端错误码', async () => {
+    const handler = vi.fn()
+    setUnauthorizedHandler(handler)
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        jsonResponse(
+          { code: 'AUTH_REQUIRED', message: '请先登录', details: {}, request_id: 'req-401' },
+          401,
+        ),
+      ),
+    )
+
+    await expect(apiGet('/auth/me')).rejects.toMatchObject({
+      status: 401,
+      code: 'AUTH_REQUIRED',
+    })
+    expect(handler).toHaveBeenCalledTimes(1)
+    expect(handler.mock.calls[0]?.[0]).toBeInstanceOf(ApiError)
+    setUnauthorizedHandler(null)
+  })
+
+  it('403 CSRF 错误不清空会话，只按后端错误抛出', async () => {
+    const handler = vi.fn()
+    setUnauthorizedHandler(handler)
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        jsonResponse(
+          { code: 'CSRF_REQUIRED', message: 'CSRF 校验失败', details: {}, request_id: 'req-403' },
+          403,
+        ),
+      ),
+    )
+    await expect(apiPost('/snapshots', {})).rejects.toMatchObject({
+      code: 'CSRF_REQUIRED',
+      kind: 'backend',
+    })
+    expect(handler).not.toHaveBeenCalled()
+    setUnauthorizedHandler(null)
+  })
+
+  it('本地输入错误使用 client 类别，不伪装成网络不可达', () => {
+    const error = clientError('批次号必须为正整数')
+    expect(error.kind).toBe('client')
+    expect(error.kindLabel).toBe('输入问题')
+    expect(error.message).toBe('批次号必须为正整数')
+    expect(error.status).toBe(0)
+    expect(error.isNetworkError).toBe(false)
+  })
+})
+
+describe('下载、文件名与查询串', () => {
+  it('解析普通与 RFC 5987 文件名', () => {
+    expect(filenameFromDisposition('attachment; filename="report.csv"')).toBe('report.csv')
+    expect(
+      filenameFromDisposition("attachment; filename*=UTF-8''%E5%A4%A7%E5%90%89.csv"),
+    ).toBe('大吉.csv')
+    expect(filenameFromDisposition(null)).toBe('')
+  })
+
+  it('apiDownload 用同源 GET 取 Blob，错误仍按契约抛出', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response('a,b', {
+            status: 200,
+            headers: {
+              'Content-Disposition': 'attachment; filename="export.csv"',
+              'Content-Type': 'text/csv',
+            },
+          }),
+      ),
+    )
+    const file = await apiDownload('/artifacts/1/download')
+    expect(file.filename).toBe('export.csv')
+    expect(file.contentType).toBe('text/csv')
+    expect(await file.blob.text()).toBe('a,b')
+    const [, init] = (vi.mocked(fetch).mock.calls[0] ?? []) as [string, RequestInit]
+    expect(init.method).toBe('GET')
+    expect(init.credentials).toBe('same-origin')
+  })
+
+  it('withQuery 跳过空值并编码非 ASCII', () => {
+    expect(withQuery('/draws', { game: 'ssq', limit: 20, cursor: null, start_issue: '' })).toBe(
+      '/draws?game=ssq&limit=20',
+    )
+    expect(withQuery('/draws', { game: '双色球' })).toContain(
+      'game=%E5%8F%8C%E8%89%B2%E7%90%83',
+    )
+    expect(withQuery('/draws', {})).toBe('/draws')
   })
 })

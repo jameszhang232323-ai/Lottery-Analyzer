@@ -251,6 +251,12 @@ describe('describeAi', () => {
       tone: 'ok',
     })
   })
+
+  it('后端没有配置状态接口时不宣称“未配置”', () => {
+    const status = describeAi({ apiAvailable: true, configured: false, configurationKnown: false })
+    expect(status).toMatchObject({ label: '配置状态未知', tone: 'neutral' })
+    expect(status.detail).toContain('未提供')
+  })
 })
 
 describe('buildGlobalStatus', () => {

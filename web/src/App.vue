@@ -1,20 +1,35 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import { RouterLink, RouterView, useRoute } from 'vue-router'
+import { computed, onMounted, ref, watch } from 'vue'
+import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 
+import { apiPost, toApiError, type ApiError, type CreateJobResponse } from './api/client'
 import DataStatus from './components/DataStatus.vue'
 import EmptyState from './components/EmptyState.vue'
 import StatusPill from './components/StatusPill.vue'
+import TaskCenter from './components/TaskCenter.vue'
+import { useJobLauncher } from './composables/useJobLauncher'
 import { routes } from './router'
+import { useAuthStore } from './stores/auth'
 import { useSystemStore } from './stores/system'
 
 const route = useRoute()
+const router = useRouter()
+const auth = useAuthStore()
 const system = useSystemStore()
+const { launch } = useJobLauncher()
 
 /** 右侧 AI 解释区可折叠；窄屏（<1200px）默认折叠为浮层，不占工作区宽度。 */
 const aiOpen = ref(
   typeof window === 'undefined' ? true : window.matchMedia('(min-width: 1200px)').matches,
 )
+
+const syncing = ref(false)
+const syncError = ref<ApiError | null>(null)
+const logoutError = ref<ApiError | null>(null)
+
+const isBlankLayout = computed(() => route.meta.layout === 'blank')
+const isAdmin = computed(() => auth.isAdmin)
+const syncGame = computed(() => system.enabledGames[0]?.code ?? 'ssq')
 
 const navigation = routes
   .filter((item) => item.meta?.nav)
@@ -27,13 +42,58 @@ const refreshLabel = computed(() =>
   system.connection === 'checking' ? '检测中…' : '重新检测',
 )
 
+async function refreshAll(force = false): Promise<void> {
+  await system.refreshAll('ssq', force)
+}
+
+async function runSync(): Promise<void> {
+  syncError.value = null
+  if (!isAdmin.value) return
+  syncing.value = true
+  try {
+    const payload = await apiPost<CreateJobResponse>('/sync-jobs', {
+      game: syncGame.value,
+      mode: 'incremental',
+    })
+    launch({
+      id: payload.job_id,
+      kind: 'sync.run',
+      label: `${syncGame.value} 增量同步`,
+      status: payload.status,
+    })
+  } catch (caught) {
+    syncError.value = toApiError(caught)
+  } finally {
+    syncing.value = false
+  }
+}
+
+async function logout(): Promise<void> {
+  logoutError.value = null
+  const ok = await auth.logout()
+  if (ok) {
+    await router.replace({ name: 'login' })
+  } else {
+    logoutError.value = auth.error
+  }
+}
+
+watch(
+  () => auth.isAuthenticated,
+  (value) => {
+    if (value) void refreshAll()
+  },
+)
+
 onMounted(() => {
-  void system.refresh()
+  if (auth.isAuthenticated) void refreshAll()
 })
 </script>
 
 <template>
-  <div class="app-shell">
+  <RouterView v-if="isBlankLayout" />
+
+  <div v-else class="app-shell">
     <header class="app-header">
       <div class="header-top">
         <div class="brand">
@@ -41,15 +101,21 @@ onMounted(() => {
           <span class="brand-sub">福彩数据分析工作台</span>
         </div>
         <div class="header-actions">
-          <button type="button" class="ghost-button" disabled title="后端接口未接入">
-            同步数据
+          <button
+            type="button"
+            class="ghost-button"
+            :disabled="syncing || !isAdmin"
+            :title="isAdmin ? '以增量模式创建同步任务' : '需要管理员角色'"
+            @click="runSync"
+          >
+            {{ syncing ? '提交中…' : '同步数据' }}
           </button>
-          <span class="unwired-note">同步接口未接入</span>
+          <span v-if="!isAdmin" class="unwired-note">仅管理员可同步</span>
           <button
             type="button"
             class="ghost-button"
             :disabled="system.connection === 'checking'"
-            @click="system.refresh()"
+            @click="refreshAll(true)"
           >
             {{ refreshLabel }}
           </button>
@@ -62,6 +128,11 @@ onMounted(() => {
           >
             {{ aiToggleLabel }}
           </button>
+          <div class="user-chip">
+            <span class="user-name">{{ auth.displayName }}</span>
+            <span class="user-role">{{ auth.role }}</span>
+            <button type="button" class="ghost-button" @click="logout">退出</button>
+          </div>
         </div>
       </div>
 
@@ -77,6 +148,12 @@ onMounted(() => {
           :title="field.detail"
         />
       </div>
+      <p v-if="syncError" class="error-inline" role="alert">
+        同步任务提交失败：{{ syncError.kindLabel }} · {{ syncError.code }} · {{ syncError.message }}
+      </p>
+      <p v-if="logoutError" class="error-inline" role="alert">
+        退出失败：{{ logoutError.kindLabel }} · {{ logoutError.code }} · {{ logoutError.message }}
+      </p>
     </header>
 
     <div class="app-body" :data-ai="aiOpen ? 'open' : 'closed'">
@@ -102,20 +179,23 @@ onMounted(() => {
           <StatusPill :tone="system.aiStatus.tone" :label="system.aiStatus.label" />
         </div>
         <p class="ai-aside-text">
-          解释文本由后端 AI 生成并引用事实 ID；界面数字以事实集为准，不采信自由文本里的数字。
+          AI 报告在“AI 分析”页查看；观察项必须引用后端事实 ID，界面数字以事实集为准，
+          不采信自由文本里的数字。
         </p>
         <EmptyState
-          title="暂无 AI 解释"
-          description="当前版本未接入 AI 服务，此处不展示任何生成内容。"
+          title="此处不展示生成内容"
+          description="右侧只显示服务状态与引用规则，完整报告、校验结果与用量在 AI 分析页。"
           hint="AI 不可用时，统计、策略草稿与已生成候选仍然保留。"
         />
         <p class="ai-aside-meta">{{ system.aiStatus.detail }}</p>
       </aside>
     </div>
 
+    <TaskCenter />
+
     <footer class="app-footer">
       <span>研究工具，不构成购彩建议；不提供购票、代购、合买或充值功能。</span>
-      <span>前端骨架 v0.1.0 · 仅健康探针与彩种清单已接通</span>
+      <span>前端 v0.1.0 · 八页已接真实接口</span>
     </footer>
   </div>
 </template>

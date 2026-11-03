@@ -8,7 +8,7 @@
  * `detail` 用于补充口径或可执行动作，界面不能只靠颜色区分状态。
  */
 
-import type { GameInfo } from '../api/types'
+import type { CoverageResponse, GameInfo, JobStatus, WindowSpec } from '../api/types'
 
 /** 状态色调；与 styles.css 中的状态 token 一一对应。 */
 export type StatusTone = 'neutral' | 'ok' | 'warn' | 'error' | 'info'
@@ -89,6 +89,8 @@ export interface DatasetState {
   conflictCount: number | null
   integrity: IntegrityState
   verification: VerificationState
+  /** 覆盖统计实际使用的期号区间；仅用于向用户说明有效期数的口径。 */
+  rangeLabel?: string | null
 }
 
 /** 首版占位数据集：接口未接通，字段保持 null，不做任何填充。 */
@@ -103,6 +105,7 @@ export const EMPTY_DATASET: DatasetState = {
   conflictCount: null,
   integrity: 'unknown',
   verification: 'unknown',
+  rangeLabel: null,
 }
 
 export type ReadinessStatus = StatusDescriptor<ReadinessState>
@@ -318,11 +321,13 @@ export function describeVerification(dataset: DatasetState): VerificationStatus 
 /* AI 可用性                                                           */
 /* ------------------------------------------------------------------ */
 
-export type AiAvailability = 'unknown' | 'unconfigured' | 'unavailable' | 'ready'
+export type AiAvailability = 'unknown' | 'config_unknown' | 'unconfigured' | 'unavailable' | 'ready'
 
 export interface AiStatusInput {
   apiAvailable: boolean
   configured: boolean
+  /** 后端未提供配置状态查询接口时为 false；此时不能宣称“未配置”。 */
+  configurationKnown?: boolean
   lastError?: string
 }
 
@@ -336,6 +341,15 @@ export function describeAi(input: AiStatusInput): AiStatus {
       label: '未接入',
       tone: 'neutral',
       detail: 'AI 接口尚未接入，AI 解释区不展示任何生成内容。',
+    }
+  }
+
+  if (input.configurationKnown === false) {
+    return {
+      state: 'config_unknown',
+      label: '配置状态未知',
+      tone: 'neutral',
+      detail: '后端未提供 AI 配置状态查询接口；提交任务后按真实结果或错误码判断。',
     }
   }
 
@@ -362,6 +376,268 @@ export function describeAi(input: AiStatusInput): AiStatus {
     label: '可用',
     tone: 'ok',
     detail: 'AI 服务已配置；发送前仍会预览资料范围。',
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* 任务状态与进度                                                      */
+/* ------------------------------------------------------------------ */
+
+export type JobUiState = JobStatus | 'unknown'
+
+export type JobStatusDescriptor = StatusDescriptor<JobUiState>
+
+/** 任务状态的统一文字与色调；终态由 {@link isTerminalJobStatus} 判定。 */
+export function describeJobStatus(status: string): JobStatusDescriptor {
+  switch (status) {
+    case 'queued':
+      return { state: 'queued', label: '排队中', tone: 'info', detail: '任务已入队，等待 worker 领取。' }
+    case 'running':
+      return { state: 'running', label: '运行中', tone: 'info', detail: '任务正在由后端 worker 执行，关闭页面不会取消。' }
+    case 'paused':
+      return { state: 'paused', label: '已暂停', tone: 'warn', detail: '任务暂时停住，仍会轮询并等待恢复。' }
+    case 'succeeded':
+      return { state: 'succeeded', label: '已完成', tone: 'ok', detail: '任务成功结束，结果以后端保存的数据为准。' }
+    case 'failed':
+      return { state: 'failed', label: '失败', tone: 'error', detail: '任务失败，保留后端错误码与信息。' }
+    case 'cancelled':
+      return { state: 'cancelled', label: '已取消', tone: 'neutral', detail: '用户取消了任务；worker 确认后进入此状态。' }
+    case 'interrupted':
+      return { state: 'interrupted', label: '已中断', tone: 'warn', detail: '任务执行中断，可由后端续跑或重新提交。' }
+    default:
+      return { state: 'unknown', label: '未知状态', tone: 'neutral', detail: `后端返回了未识别的任务状态：${status || '空'}` }
+  }
+}
+
+const TERMINAL_JOB_STATUSES: ReadonlySet<string> = new Set([
+  'succeeded',
+  'failed',
+  'cancelled',
+  'interrupted',
+])
+
+/** 终态任务停止轮询；paused 仍轮询，因为后端可能恢复执行。 */
+export function isTerminalJobStatus(status: string): boolean {
+  return TERMINAL_JOB_STATUSES.has(status)
+}
+
+export function jobKindLabel(kind: string): string {
+  switch (kind) {
+    case 'sync.run':
+      return '数据同步'
+    case 'analysis.run':
+      return '统计分析'
+    case 'candidate.generate':
+      return '候选生成'
+    case 'backtest.run':
+      return '历史回测'
+    case 'ai.analyze':
+      return 'AI 分析'
+    default:
+      return kind || '任务'
+  }
+}
+
+export interface JobProgressDescriptor {
+  text: string
+  percent: number | null
+  phase: string
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null
+}
+
+function firstFiniteNumber(source: Record<string, unknown> | null, keys: readonly string[]): number | null {
+  if (!source) return null
+  for (const key of keys) {
+    const value = source[key]
+    if (typeof value === 'number' && Number.isFinite(value)) return value
+  }
+  return null
+}
+
+function firstText(source: Record<string, unknown> | null, keys: readonly string[]): string {
+  if (!source) return ''
+  for (const key of keys) {
+    const value = source[key]
+    if (typeof value === 'string' && value.trim()) return value.trim()
+  }
+  return ''
+}
+
+/**
+ * 把后端 progress / checkpoint 收敛为进度文字与百分比。
+ *
+ * 后端不同任务使用不同字段（processed_periods、total_periods 等），这里只读取
+ * 明确存在的数值；未知时返回“—”，不推测完成比例。
+ */
+export function describeJobProgress(progress: unknown, checkpoint: unknown = null): JobProgressDescriptor {
+  const source = asRecord(progress) ?? asRecord(checkpoint)
+  if (source === null) {
+    if (typeof progress === 'string' && progress.trim()) {
+      return { text: progress.trim(), percent: null, phase: '' }
+    }
+    return { text: '—', percent: null, phase: '' }
+  }
+
+  const phase = firstText(source, ['phase', 'stage', 'status'])
+  const completed = firstFiniteNumber(source, [
+    'processed_periods',
+    'completed',
+    'completed_count',
+    'done',
+    'current',
+  ])
+  const total = firstFiniteNumber(source, [
+    'total_periods',
+    'total',
+    'total_count',
+    'periods',
+    'planned',
+  ])
+  const message = firstText(source, ['message', 'detail', 'note'])
+
+  if (completed !== null && total !== null && total > 0) {
+    const percent = Math.max(0, Math.min(100, Math.round((completed / total) * 100)))
+    return {
+      text: `${phase ? `${phase} ` : ''}${completed}/${total}（${percent}%）`,
+      percent,
+      phase,
+    }
+  }
+  if (completed !== null) {
+    return { text: `${phase ? `${phase} ` : ''}已完成 ${completed}`, percent: null, phase }
+  }
+  if (message) return { text: message, percent: null, phase }
+  if (phase) return { text: phase, percent: null, phase }
+  return { text: '—', percent: null, phase }
+}
+
+/* ------------------------------------------------------------------ */
+/* 开奖质量、覆盖与候选状态                                            */
+/* ------------------------------------------------------------------ */
+
+export type DrawQualityState = 'unknown' | 'unverified' | 'verified' | 'disputed'
+
+/** 单期质量：文字 + 色调，避免只靠红绿区分。 */
+export function describeDrawQuality(status: string): StatusDescriptor<DrawQualityState> {
+  switch (status) {
+    case 'verified':
+      return { state: 'verified', label: '已核验', tone: 'ok', detail: '该修订有已核验来源证据。' }
+    case 'unverified':
+      return { state: 'unverified', label: '未核验', tone: 'info', detail: '单源结构通过或尚未取得核验证据。' }
+    case 'disputed':
+      return { state: 'disputed', label: '存在冲突', tone: 'error', detail: '来源之间矛盾，正式结算暂停，需先复核。' }
+    default:
+      return { state: 'unknown', label: '未评估', tone: 'neutral', detail: '后端未返回该修订的质量状态。' }
+  }
+}
+
+export type CoverageState = 'unknown' | 'complete' | 'incomplete' | 'conflict' | 'calendar_unknown'
+
+/** 覆盖清单状态：只有日历已知且期数已解释时才宣称完整。 */
+export function describeCoverage(coverage: CoverageResponse | null): StatusDescriptor<CoverageState> {
+  if (coverage === null) {
+    return { state: 'unknown', label: '未查询', tone: 'neutral', detail: '尚未请求覆盖清单。' }
+  }
+  if (coverage.disputed_count > 0) {
+    return {
+      state: 'conflict',
+      label: '存在冲突',
+      tone: 'error',
+      detail: `${coverage.disputed_count} 期存在来源冲突，正式结算暂停。`,
+    }
+  }
+  if (!coverage.calendar_known) {
+    return {
+      state: 'calendar_unknown',
+      label: '日历未知',
+      tone: 'warn',
+      detail: '缺少官方日历，无法判断该范围的预计期数与缺期。',
+    }
+  }
+  if (coverage.complete) {
+    return {
+      state: 'complete',
+      label: '范围完整',
+      tone: 'ok',
+      detail: `预计 ${coverage.expected_count ?? '—'} 期，已取得 ${coverage.acquired_count} 期，无未解决缺期与冲突。`,
+    }
+  }
+  return {
+    state: 'incomplete',
+    label: '范围不完整',
+    tone: 'warn',
+    detail: `预计 ${coverage.expected_count ?? '—'} 期，已取得 ${coverage.acquired_count} 期，缺失 ${coverage.missing_count ?? '—'} 期。`,
+  }
+}
+
+export type CandidateUiState =
+  | 'unknown'
+  | 'draft'
+  | 'locked'
+  | 'awaiting_result'
+  | 'settled'
+  | 'archived'
+
+/** 候选批次生命周期；锁定后只可追加说明或归档。 */
+export function describeCandidateStatus(status: string): StatusDescriptor<CandidateUiState> {
+  switch (status) {
+    case 'draft':
+      return { state: 'draft', label: '草稿', tone: 'neutral', detail: '尚未锁定，可继续生成说明。' }
+    case 'locked':
+      return { state: 'locked', label: '已锁定', tone: 'info', detail: '核心内容已冻结，只能追加说明或归档。' }
+    case 'awaiting_result':
+      return { state: 'awaiting_result', label: '待开奖', tone: 'info', detail: '目标期尚未开奖或尚未核对。' }
+    case 'settled':
+      return { state: 'settled', label: '已核对', tone: 'ok', detail: '已生成结算修订；开奖更正会追加新修订。' }
+    case 'archived':
+      return { state: 'archived', label: '已归档', tone: 'neutral', detail: '批次已归档，历史记录保留。' }
+    default:
+      return { state: 'unknown', label: '未知状态', tone: 'neutral', detail: `后端返回了未识别的批次状态：${status || '空'}` }
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* 角色与格式化                                                        */
+/* ------------------------------------------------------------------ */
+
+export function roleLabel(role: string): string {
+  switch (role) {
+    case 'admin':
+      return '管理员'
+    case 'analyst':
+      return '分析员'
+    case 'viewer':
+      return '访客'
+    default:
+      return role || '未知角色'
+  }
+}
+
+/** 窗口标签：数字窗口写作“N 期”，全范围写作“全部”。 */
+export function windowLabel(window: WindowSpec): string {
+  return window === 'all' ? '全部' : `${window} 期`
+}
+
+/** 比率展示；保留 4 位小数仍以字符串呈现，避免前端重算统计口径。 */
+export function formatRatio(value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) return '—'
+  return value.toFixed(4)
+}
+
+/** 安全地把未知 JSON 值展开为可读文本，用于后端返回的结构化摘要。 */
+export function formatJsonValue(value: unknown): string {
+  if (value === null || value === undefined) return '—'
+  if (typeof value === 'string') return value
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
+  try {
+    return JSON.stringify(value)
+  } catch {
+    return String(value)
   }
 }
 
@@ -434,7 +710,7 @@ export function buildGlobalStatus(input: GlobalStatusInput): GlobalStatusField[]
       value: formatCount(input.dataset.validDrawCount),
       tone: dataWired && (input.dataset.validDrawCount ?? 0) > 0 ? 'ok' : 'neutral',
       unwired: !dataWired || input.dataset.validDrawCount === null,
-      note: readiness.label,
+      note: input.dataset.rangeLabel ? `区间 ${input.dataset.rangeLabel}` : readiness.label,
       detail: '有效期数是可分析期数，不等同于预计期数。',
     },
     {

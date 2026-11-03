@@ -1,26 +1,35 @@
 /**
- * 后端 HTTP 客户端：统一前缀、同源会话与错误结构。
+ * 后端 HTTP 客户端：统一前缀、同源会话、CSRF 与错误结构。
  *
- * 约定（设计文档 11.2）：所有请求走 `/api/v1`；错误体为
- * `code` / `message` / `details` / `request_id`。
- *
- * 安全边界（设计文档 6.4、13.1）：
- * - 服务密钥与访问令牌只由后端读取，浏览器只使用 HttpOnly Cookie；
- * - 本模块（以及整个前端）不读写 localStorage / sessionStorage / document.cookie，
- *   避免把凭证落进浏览器存储。`credentials: 'same-origin'` 即可携带会话 Cookie。
- * - 网络失败（请求未到达后端）与后端业务错误用 `ApiError.kind` 区分。
+ * 约定（设计文档 11.2、13.1）：
+ * - 所有请求走 `/api/v1`；错误体为 `code` / `message` / `details` / `request_id`；
+ * - 浏览器只使用 HttpOnly 会话 Cookie；CSRF 值从非 HttpOnly 的
+ *   `dajidali_csrf` Cookie 读取，并对所有非安全方法附带 `X-CSRF-Token`；
+ * - 本模块不读写 localStorage / sessionStorage，也不写 Cookie；
+ * - 网络失败（请求未到达后端）与后端业务错误用 `ApiError.kind` 区分；
+ * - 收到 401 时通知已注册的处理器清空会话并回到登录页。
  */
 
 import type { ApiErrorBody } from './types'
 
-export type { ApiErrorBody, GamesResponse, GameInfo, HealthStatus } from './types'
+export type {
+  ApiErrorBody,
+  CreateJobResponse,
+  GamesResponse,
+  GameInfo,
+  HealthStatus,
+} from './types'
 
 export const API_BASE = '/api/v1'
+export const SESSION_COOKIE_NAME = 'dajidali_session'
+export const CSRF_COOKIE_NAME = 'dajidali_csrf'
+export const CSRF_HEADER_NAME = 'X-CSRF-Token'
 
-/** 错误来源：后端业务错误、后端响应不符合契约、以及请求未能到达后端。 */
-export type ApiErrorKind = 'backend' | 'unexpected' | 'network'
+/** 错误来源：后端业务错误、后端响应不符合契约、请求未到达后端，以及本地输入问题。 */
+export type ApiErrorKind = 'backend' | 'unexpected' | 'network' | 'client'
 
 const NETWORK_ERROR_MESSAGE = '无法连接后端服务，请确认服务已启动后重试。'
+const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS', 'TRACE'])
 
 /**
  * 统一错误对象。
@@ -49,6 +58,10 @@ export class ApiError extends Error {
     return this.kind === 'network'
   }
 
+  get isAuthRequired(): boolean {
+    return this.status === 401
+  }
+
   /** 与后端错误体同名，便于日志和契约测试直接读取。 */
   get request_id(): string {
     return this.requestId
@@ -61,10 +74,48 @@ export class ApiError extends Error {
         return '网络不可达'
       case 'unexpected':
         return '响应异常'
+      case 'client':
+        return '输入问题'
       default:
         return '后端错误'
     }
   }
+}
+
+/** 401 处理器：由会话层注册，负责清空内存会话并跳转登录页。 */
+export type UnauthorizedHandler = (error: ApiError) => void
+
+let unauthorizedHandler: UnauthorizedHandler | null = null
+
+export function setUnauthorizedHandler(handler: UnauthorizedHandler | null): void {
+  unauthorizedHandler = handler
+}
+
+export function isSafeMethod(method: string): boolean {
+  return SAFE_METHODS.has(method.toUpperCase())
+}
+
+/** 从 Cookie 头文本读取指定名称的值；值保持原样（base64url 不含分隔符）。 */
+export function readCookieValue(cookieHeader: string, name: string): string {
+  if (!cookieHeader) return ''
+  for (const part of cookieHeader.split(';')) {
+    const index = part.indexOf('=')
+    if (index < 0) continue
+    const key = part.slice(0, index).trim()
+    if (key !== name) continue
+    return part.slice(index + 1).trim()
+  }
+  return ''
+}
+
+/** 从 Cookie 头文本提取 CSRF 令牌；不存在时返回 null，而不是空串。 */
+export function csrfTokenFrom(cookieHeader: string | null | undefined): string | null {
+  const token = readCookieValue(cookieHeader ?? '', CSRF_COOKIE_NAME)
+  return token || null
+}
+
+function currentCookieHeader(): string {
+  return typeof document === 'undefined' ? '' : document.cookie
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -128,14 +179,53 @@ export function toApiError(error: unknown): ApiError {
   return error instanceof ApiError ? error : mapNetworkError(error)
 }
 
+/** 本地输入校验错误：不冒充后端错误，也不归入网络不可达。 */
+export function clientError(message: string, code = 'INVALID_INPUT'): ApiError {
+  return new ApiError(
+    0,
+    { code, message, details: {}, request_id: '' },
+    'client',
+  )
+}
+
+/** 从 Content-Disposition 取文件名；优先 RFC 5987 的 filename*。 */
+export function filenameFromDisposition(header: string | null): string {
+  if (!header) return ''
+  const encoded = /filename\*\s*=\s*UTF-8''([^;]+)/i.exec(header)
+  if (encoded?.[1]) {
+    try {
+      return decodeURIComponent(encoded[1].trim().replace(/^"|"$/g, ''))
+    } catch {
+      return encoded[1].trim().replace(/^"|"$/g, '')
+    }
+  }
+  const plain = /filename\s*=\s*"?([^";]+)"?/i.exec(header)
+  return plain?.[1]?.trim() ?? ''
+}
+
+async function readResponsePayload(response: Response): Promise<unknown> {
+  try {
+    return await response.json()
+  } catch {
+    return null
+  }
+}
+
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const method = (init.method ?? 'GET').toUpperCase()
   const headers = new Headers(init.headers)
   headers.set('Accept', 'application/json')
+
+  if (!isSafeMethod(method)) {
+    const token = csrfTokenFrom(currentCookieHeader())
+    if (token) headers.set(CSRF_HEADER_NAME, token)
+  }
 
   let response: Response
   try {
     response = await fetch(`${API_BASE}${path}`, {
       ...init,
+      method,
       credentials: 'same-origin',
       headers,
     })
@@ -149,15 +239,12 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     return undefined as T
   }
 
-  let payload: unknown = null
-  try {
-    payload = await response.json()
-  } catch {
-    payload = null
-  }
+  const payload = await readResponsePayload(response)
 
   if (!response.ok) {
-    throw mapErrorResponse(response.status, payload, requestId)
+    const apiError = mapErrorResponse(response.status, payload, requestId)
+    if (apiError.status === 401) unauthorizedHandler?.(apiError)
+    throw apiError
   }
 
   if (payload === null) {
@@ -184,8 +271,8 @@ export function apiGet<T>(path: string, init?: RequestInit): Promise<T> {
 /**
  * POST 请求，路径相对 `/api/v1`。
  *
- * `body` 为 undefined 时不写请求体；有值时按 JSON 序列化。
- * 副作用接口的幂等键与 CSRF 令牌由后续任务在同一处补充，不写入浏览器存储。
+ * `body` 为 undefined 时不写请求体；有值时按 JSON 序列化。非安全方法自动附带
+ * 当前会话绑定的 CSRF 令牌（由 Cookie 读取，不写入浏览器存储）。
  */
 export function apiPost<T>(path: string, body?: unknown, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers)
@@ -196,4 +283,47 @@ export function apiPost<T>(path: string, body?: unknown, init: RequestInit = {})
     headers,
     body: body === undefined ? init.body : JSON.stringify(body),
   })
+}
+
+/** 附件下载：用同源 fetch 携带会话 Cookie，不把令牌放进 URL。 */
+export async function apiDownload(
+  path: string,
+): Promise<{ blob: Blob; filename: string; contentType: string }> {
+  let response: Response
+  try {
+    response = await fetch(`${API_BASE}${path}`, {
+      method: 'GET',
+      credentials: 'same-origin',
+      headers: { Accept: '*/*' },
+    })
+  } catch (error) {
+    throw mapNetworkError(error)
+  }
+
+  if (!response.ok) {
+    const payload = await readResponsePayload(response)
+    const apiError = mapErrorResponse(response.status, payload, response.headers.get('X-Request-ID'))
+    if (apiError.status === 401) unauthorizedHandler?.(apiError)
+    throw apiError
+  }
+
+  return {
+    blob: await response.blob(),
+    filename: filenameFromDisposition(response.headers.get('Content-Disposition')),
+    contentType: response.headers.get('Content-Type') ?? 'application/octet-stream',
+  }
+}
+
+/** 统一构造带查询参数的 GET 路径；空值不写入查询串。 */
+export function withQuery(
+  path: string,
+  query: Record<string, string | number | boolean | null | undefined>,
+): string {
+  const params = new URLSearchParams()
+  for (const [key, value] of Object.entries(query)) {
+    if (value === null || value === undefined || value === '') continue
+    params.set(key, String(value))
+  }
+  const text = params.toString()
+  return text ? `${path}?${text}` : path
 }
