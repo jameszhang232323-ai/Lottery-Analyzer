@@ -45,6 +45,9 @@ from dajidali.api.routes import (
     draws as draws_routes,
 )
 from dajidali.api.routes import (
+    settlements as settlements_routes,
+)
+from dajidali.api.routes import (
     snapshots as snapshots_routes,
 )
 from dajidali.api.routes import (
@@ -158,6 +161,7 @@ def create_app(engine: Engine | None = None) -> FastAPI:
     ai_jobs_routes.register(app, prefix=API_PREFIX)
     artifacts_routes.register(app)
     backups_routes.register(app)
+    settlements_routes.register(app, prefix=API_PREFIX)
 
     # 本机单进程模式：设置了 DAJIDALI_STATIC_DIR 且存在 web/dist 时，
     # 由 API 直接提供八页界面（服务器模式交给 nginx）。必须放在所有 API 路由之后。
