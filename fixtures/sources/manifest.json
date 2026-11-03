@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "kind": "source-fixture-manifest",
+  "synthetic": true,
+  "notice": "All issues, dates and numbers in this directory are synthetic test data. They are not official lottery results, not a real provider response, and must never be presented as verified draw data.",
+  "sources": [
+    {
+      "source_id": "recorded.ssq.v1",
+      "fixture": "recorded-ssq.json",
+      "game": "ssq",
+      "record_count": 39,
+      "pagination": "cursor",
+      "correction_issue": "2025028",
+      "closure_gap": {
+        "first_missing_issue": "2025011",
+        "last_missing_issue": "2025018",
+        "reason": "synthetic Spring Festival closure gap"
+      },
+      "scenarios": [
+        "normal",
+        "malformed",
+        "rate_limited",
+        "timeout",
+        "auth_failed",
+        "conflict"
+      ],
+      "license": {
+        "identifier": "synthetic-fixture-only",
+        "verified": false,
+        "allows_storage": true,
+        "allows_display": false,
+        "allows_redistribution": false,
+        "note": "No real provider terms have been accepted. This fixture only exercises adapter and sync logic."
+      }
+    }
+  ],
+  "not_verified": [
+    "real provider authentication and 403 behaviour",
+    "real provider rate-limit headers and retry-after values",
+    "real field mapping, revision capability and five-year history",
+    "storage/display licence for any real source"
+  ]
+}

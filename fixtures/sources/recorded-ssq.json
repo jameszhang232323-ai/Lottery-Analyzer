@@ -1,0 +1,84 @@
+{
+  "schema_version": 1,
+  "source_id": "recorded.ssq.v1",
+  "synthetic": true,
+  "notice": "Synthetic recorded fixture for adapter, sync and coverage tests. Not real lottery data.",
+  "retrieved_at": "2026-11-01T12:00:00+00:00",
+  "games": ["ssq"],
+  "history_start": "2024-12-01",
+  "history_end": "2025-03-13",
+  "pagination": {
+    "mode": "cursor",
+    "max_page_size": 12,
+    "default_page_size": 10
+  },
+  "rate_limit": {
+    "requests_per_minute": 6,
+    "retry_after_seconds": 30
+  },
+  "supports_revision": true,
+  "license": {
+    "identifier": "synthetic-fixture-only",
+    "allows_storage": true,
+    "allows_display": false,
+    "allows_redistribution": false,
+    "verified": false,
+    "terms_url": null
+  },
+  "records": [
+    {"issue": "2024138", "draw_date": "2024-12-01", "reds": [2, 5, 11, 18, 23, 31], "blue": 9, "prizes": [{"code": "first", "amount_fen": 5000000, "count": 4}, {"code": "second", "amount_fen": 150000, "count": 92}]},
+    {"issue": "2024139", "draw_date": "2024-12-03", "reds": [1, 7, 12, 20, 25, 32], "blue": 4},
+    {"issue": "2024140", "draw_date": "2024-12-05", "reds": [3, 9, 14, 19, 27, 33], "blue": 11},
+    {"issue": "2024141", "draw_date": "2024-12-08", "reds": [4, 6, 13, 21, 28, 30], "blue": 2},
+    {"issue": "2024142", "draw_date": "2024-12-10", "reds": [5, 10, 15, 22, 26, 31], "blue": 16},
+    {"issue": "2024143", "draw_date": "2024-12-12", "reds": [2, 8, 16, 18, 24, 29], "blue": 7},
+    {"issue": "2024144", "draw_date": "2024-12-15", "reds": [1, 9, 11, 20, 27, 32], "blue": 13},
+    {"issue": "2024145", "draw_date": "2024-12-17", "reds": [6, 12, 17, 23, 28, 33], "blue": 5, "prizes": [{"code": "first", "amount_fen": 5000000, "count": 6}, {"code": "second", "amount_fen": 150000, "count": 110}]},
+    {"issue": "2024146", "draw_date": "2024-12-19", "reds": [3, 7, 14, 19, 25, 30], "blue": 8},
+    {"issue": "2024147", "draw_date": "2024-12-22", "reds": [4, 10, 15, 21, 26, 31], "blue": 1},
+    {"issue": "2024148", "draw_date": "2024-12-24", "reds": [2, 5, 13, 22, 27, 32], "blue": 12},
+    {"issue": "2024149", "draw_date": "2024-12-26", "reds": [8, 11, 16, 18, 24, 29], "blue": 6},
+    {"issue": "2024150", "draw_date": "2024-12-29", "reds": [1, 6, 12, 20, 28, 33], "blue": 10},
+    {"issue": "2025001", "draw_date": "2025-01-02", "reds": [3, 9, 14, 17, 25, 31], "blue": 4},
+    {"issue": "2025002", "draw_date": "2025-01-05", "reds": [5, 7, 13, 21, 26, 32], "blue": 15},
+    {"issue": "2025003", "draw_date": "2025-01-07", "reds": [2, 10, 16, 19, 27, 30], "blue": 9, "prizes": [{"code": "first", "amount_fen": 5000000, "count": 3}, {"code": "second", "amount_fen": 150000, "count": 80}]},
+    {"issue": "2025004", "draw_date": "2025-01-09", "reds": [4, 8, 11, 22, 28, 33], "blue": 3},
+    {"issue": "2025005", "draw_date": "2025-01-12", "reds": [1, 12, 15, 20, 24, 31], "blue": 7, "prizes": [{"code": "first", "amount_fen": null, "count": null}]},
+    {"issue": "2025006", "draw_date": "2025-01-14", "reds": [6, 9, 17, 18, 25, 29], "blue": 14},
+    {"issue": "2025007", "draw_date": "2025-01-16", "reds": [3, 7, 13, 21, 27, 32], "blue": 2},
+    {"issue": "2025008", "draw_date": "2025-01-19", "reds": [5, 11, 16, 19, 26, 30], "blue": 8},
+    {"issue": "2025009", "draw_date": "2025-01-21", "reds": [2, 8, 14, 22, 24, 33], "blue": 12},
+    {"issue": "2025010", "draw_date": "2025-01-23", "reds": [4, 10, 15, 18, 28, 31], "blue": 1, "prizes": [{"code": "first", "amount_fen": 5000000, "count": 5}, {"code": "second", "amount_fen": 150000, "count": 95}]},
+    {"issue": "2025019", "draw_date": "2025-02-06", "reds": [1, 6, 12, 20, 25, 32], "blue": 11},
+    {"issue": "2025020", "draw_date": "2025-02-09", "reds": [3, 9, 17, 23, 27, 30], "blue": 5},
+    {"issue": "2025021", "draw_date": "2025-02-11", "reds": [7, 11, 14, 19, 26, 33], "blue": 16},
+    {"issue": "2025022", "draw_date": "2025-02-13", "reds": [2, 5, 13, 21, 28, 31], "blue": 6, "prizes": [{"code": "first", "amount_fen": 5000000, "count": 2}, {"code": "second", "amount_fen": 150000, "count": 70}]},
+    {"issue": "2025023", "draw_date": "2025-02-16", "reds": [4, 8, 16, 18, 24, 32], "blue": 10},
+    {"issue": "2025024", "draw_date": "2025-02-18", "reds": [1, 10, 15, 22, 25, 29], "blue": 3},
+    {"issue": "2025025", "draw_date": "2025-02-20", "reds": [6, 12, 17, 20, 27, 33], "blue": 13},
+    {"issue": "2025026", "draw_date": "2025-02-23", "reds": [3, 7, 11, 23, 26, 30], "blue": 9},
+    {"issue": "2025027", "draw_date": "2025-02-25", "reds": [5, 9, 14, 19, 28, 31], "blue": 4},
+    {"issue": "2025028", "draw_date": "2025-02-27", "reds": [3, 8, 14, 21, 26, 32], "blue": 7, "prizes": [{"code": "first", "amount_fen": 5000000, "count": 8}, {"code": "second", "amount_fen": 150000, "count": 120}]},
+    {"issue": "2025029", "draw_date": "2025-03-02", "reds": [2, 11, 16, 18, 25, 33], "blue": 15},
+    {"issue": "2025030", "draw_date": "2025-03-04", "reds": [4, 6, 13, 22, 27, 29], "blue": 8},
+    {"issue": "2025031", "draw_date": "2025-03-06", "reds": [1, 7, 12, 20, 24, 32], "blue": 2},
+    {"issue": "2025032", "draw_date": "2025-03-09", "reds": [5, 10, 15, 19, 26, 30], "blue": 11},
+    {"issue": "2025033", "draw_date": "2025-03-11", "reds": [3, 8, 17, 21, 28, 31], "blue": 5},
+    {"issue": "2025034", "draw_date": "2025-03-13", "reds": [6, 9, 14, 23, 25, 33], "blue": 7, "prizes": [{"code": "first", "amount_fen": 5000000, "count": 1}, {"code": "second", "amount_fen": 150000, "count": 60}]}
+  ],
+  "corrections": [
+    {"issue": "2025028", "draw_date": "2025-02-27", "reds": [3, 8, 14, 21, 26, 32], "blue": 12, "correction": true, "note": "synthetic correction sample: blue ball corrected"}
+  ],
+  "scenarios": {
+    "malformed": {
+      "records": [
+        {"issue": "2099001", "draw_date": "2099-01-01", "reds": [1, 2, 3, 4, 5], "blue": 9}
+      ]
+    },
+    "conflict": {
+      "issue": "2025028",
+      "reds": [3, 8, 14, 21, 26, 32],
+      "blue": 15
+    }
+  }
+}
