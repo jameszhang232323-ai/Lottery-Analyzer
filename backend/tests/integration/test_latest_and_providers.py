@@ -150,3 +150,36 @@ def test_providers_report_configured_without_leaking_key(monkeypatch: pytest.Mon
 def test_providers_require_admin() -> None:
     with _environment() as env:
         assert env.analyst.get("/api/v1/admin/providers").status_code == 403
+
+
+def test_draws_filter_by_date_range() -> None:
+    with _environment() as env:
+        items = env.analyst.get(
+            "/api/v1/draws", params={"start_date": "2025-01-02"}
+        ).json()["items"]
+        assert [item["issue"] for item in items] == ISSUES[1:]
+
+        items = env.analyst.get(
+            "/api/v1/draws", params={"end_date": "2025-01-02"}
+        ).json()["items"]
+        assert [item["issue"] for item in items] == ISSUES[:2]
+
+        between = env.analyst.get(
+            "/api/v1/draws",
+            params={"start_date": "2025-01-02", "end_date": "2025-01-02"},
+        ).json()["items"]
+        assert [item["issue"] for item in between] == [ISSUES[1]]
+
+
+def test_draws_reject_invalid_date() -> None:
+    with _environment() as env:
+        bad = env.analyst.get("/api/v1/draws", params={"start_date": "2025/01/02"})
+        assert bad.status_code == 422
+        assert bad.json()["code"] == "INVALID_DATE"
+
+        inverted = env.analyst.get(
+            "/api/v1/draws",
+            params={"start_date": "2025-01-03", "end_date": "2025-01-01"},
+        )
+        assert inverted.status_code == 422
+        assert inverted.json()["code"] == "INVALID_DATE_RANGE"

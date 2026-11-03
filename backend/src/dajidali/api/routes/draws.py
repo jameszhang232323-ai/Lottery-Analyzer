@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import base64
 import json
+from datetime import date
 from typing import Any
 
 from fastapi import APIRouter, FastAPI
@@ -87,6 +88,30 @@ def _validate_range(start_issue: str | None, end_issue: str | None) -> None:
         )
 
 
+def _parse_date(value: str | None, field: str) -> date | None:
+    """解析 ISO 日期；空串视为未筛选，非法值明确报错。"""
+    if value is None or value == "":
+        return None
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        raise DrawApiError(
+            f"{field} 必须是 YYYY-MM-DD 日期",
+            code="INVALID_DATE",
+            field=field,
+        ) from None
+
+
+def _validate_dates(
+    start_date: str | None, end_date: str | None
+) -> tuple[date | None, date | None]:
+    start = _parse_date(start_date, "start_date")
+    end = _parse_date(end_date, "end_date")
+    if start is not None and end is not None and start > end:
+        raise DrawApiError("开始日期不能晚于结束日期", code="INVALID_DATE_RANGE")
+    return start, end
+
+
 def _numbers_payload(row: DrawRevisionRow) -> dict[str, Any]:
     numbers = decode_numbers(row.number_type, row.numbers_json)
     if isinstance(numbers, SsqNumbers):
@@ -127,6 +152,8 @@ def _current_rows(
     game: str,
     start_issue: str | None,
     end_issue: str | None,
+    start_date: date | None = None,
+    end_date: date | None = None,
 ) -> list[tuple[DrawRevisionRow, str]]:
     rows = session.execute(
         select(DrawRevisionRow, DrawCurrent.status)
@@ -149,6 +176,10 @@ def _current_rows(
             continue
         if end_key is not None and key > end_key:
             continue
+        if start_date is not None and row.draw_date < start_date:
+            continue
+        if end_date is not None and row.draw_date > end_date:
+            continue
         selected.append((row, status))
     selected.sort(key=lambda item: issue_sort_key(item[0].issue))
     return selected
@@ -159,15 +190,21 @@ def list_draws(
     game: str = "ssq",
     start_issue: str | None = None,
     end_issue: str | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
     limit: int = DEFAULT_PAGE_LIMIT,
     cursor: str | None = None,
     user: User = AuthenticatedUser,
     db: Session = DbSession,
 ) -> dict[str, Any]:
-    """分页读取当前修订；``cursor`` 是上一页最后一期的稳定游标。"""
+    """分页读取当前修订；``cursor`` 是上一页最后一期的稳定游标。
+
+    期号区间与日期区间可同时使用（取交集）；日期按开奖日期（中国本地日期）比较。
+    """
     del user  # 依赖已证明登录；公共开奖数据不按用户过滤
     require_game(db, game)
     _validate_range(start_issue, end_issue)
+    date_from, date_to = _validate_dates(start_date, end_date)
     if isinstance(limit, bool) or limit < 1 or limit > MAX_PAGE_LIMIT:
         raise DrawApiError(
             f"limit 必须在 1—{MAX_PAGE_LIMIT} 之间",
@@ -176,7 +213,7 @@ def list_draws(
         )
     after = _decode_cursor(cursor) if cursor else None
     after_key = issue_sort_key(after) if after is not None else None
-    rows = _current_rows(db, game, start_issue, end_issue)
+    rows = _current_rows(db, game, start_issue, end_issue, date_from, date_to)
     if after_key is not None:
         rows = [item for item in rows if issue_sort_key(item[0].issue) > after_key]
     page = rows[:limit]
