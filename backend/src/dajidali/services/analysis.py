@@ -56,6 +56,7 @@ from dajidali.jobs.worker import (
     unregister_handler,
 )
 from dajidali.security.authorization import NOT_FOUND_MESSAGE, NotFoundError
+from dajidali.services.queue_limits import ensure_capacity_for_submission
 
 API_PREFIX = "/api/v1"
 ANALYSIS_JOB_KIND = "analysis.run"
@@ -377,6 +378,9 @@ def submit_analysis_job(
         "snapshot_hash": snapshot.hash,
         "windows": list(specs),
     }
+    ensure_capacity_for_submission(
+        session, owner_id=owner_id, idempotency_key=idempotency_key
+    )
     try:
         job = JobRepository(session).enqueue(
             ANALYSIS_JOB_KIND,

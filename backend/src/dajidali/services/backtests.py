@@ -83,6 +83,7 @@ from dajidali.jobs.worker import (
 from dajidali.security.authorization import NOT_FOUND_MESSAGE, NotFoundError
 from dajidali.services.analysis import load_snapshot_draws
 from dajidali.services.candidate_jobs import CandidateJobError, parse_strategy
+from dajidali.services.queue_limits import ensure_capacity_for_submission
 
 API_PREFIX = "/api/v1"
 BACKTEST_JOB_KIND = "backtest.run"
@@ -353,6 +354,9 @@ def submit_backtest_job(
         "stage": parsed_stage.value,
         "name": parsed_name,
     }
+    ensure_capacity_for_submission(
+        session, owner_id=owner_id, idempotency_key=idempotency_key
+    )
     try:
         job = JobRepository(session).enqueue(
             BACKTEST_JOB_KIND,

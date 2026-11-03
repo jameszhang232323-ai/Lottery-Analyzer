@@ -19,6 +19,7 @@ from dajidali.data.models import User, require_game
 from dajidali.domain.canonical import sha256_hex
 from dajidali.domain.errors import DomainError
 from dajidali.jobs.repository import JobRepository
+from dajidali.services.queue_limits import ensure_capacity_for_submission
 from dajidali.services.sync import (
     DEFAULT_HISTORY_BATCH,
     DEFAULT_INCREMENTAL_WINDOW,
@@ -103,6 +104,9 @@ def create_sync_job(
             code="SYNC_START_REQUIRED",
         )
     job_payload = request.to_payload()
+    ensure_capacity_for_submission(
+        db, owner_id=user.id, idempotency_key=idempotency_key
+    )
     try:
         job = JobRepository(db).enqueue(
             SYNC_JOB_KIND,

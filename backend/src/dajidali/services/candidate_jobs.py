@@ -57,6 +57,7 @@ from dajidali.jobs.worker import (
 from dajidali.security.authorization import NOT_FOUND_MESSAGE, NotFoundError
 from dajidali.services.analysis import load_snapshot_draws
 from dajidali.services.candidate_ledger import create_candidate_batch
+from dajidali.services.queue_limits import ensure_capacity_for_submission
 
 API_PREFIX = "/api/v1"
 CANDIDATE_JOB_KIND = "candidate.generate"
@@ -433,6 +434,9 @@ def submit_candidate_job(
         "seed_hex": parsed_seed,
         "target_issue": resolved_target,
     }
+    ensure_capacity_for_submission(
+        session, owner_id=owner_id, idempotency_key=idempotency_key
+    )
     try:
         job = JobRepository(session).enqueue(
             CANDIDATE_JOB_KIND,

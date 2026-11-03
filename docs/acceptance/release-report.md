@@ -10,7 +10,7 @@
 | 项 | 结果 | 命令 |
 |---|---|---|
 | 后端静态检查 | 通过 | `backend/.venv/Scripts/python.exe -m ruff check src tests` |
-| 后端测试 | **635 passed, 2 skipped** | `.venv\Scripts\python.exe -m pytest` |
+| 后端测试 | **638 passed, 2 skipped** | `.venv\Scripts\python.exe -m pytest` |
 | 前端类型检查 | 通过 | `node <node> <pnpm> typecheck` |
 | 前端构建 | 通过（主包 252 kB / gzip 83 kB，ECharts 分块） | `... build` |
 | 前端单元测试 | **85 passed** | `... test:unit` |
@@ -63,7 +63,8 @@
 
 ## 四、已知功能缺口（不影响主闭环）
 
-1. 任务队列限流：状态机（列表/视图/取消/暂停/恢复/事件）已完整；仍缺全局队列上限与每用户等待上限（429）。
+1. 队列限额：全局等待上限 50、每用户等待上限 3 已实现（超额 429 `QUEUE_FULL`，幂等重放不受限）；
+   仍缺按类型的并发限流（每来源 1 个采集、全局 1 个回测、1 个 AI）。
 2. 来源与 AI 的配置**写入**：已有 `GET /admin/providers` 状态查询；仍无 `PUT /admin/providers/{id}` 与连接测试 `POST /admin/providers/{id}/test`。
 3. 结算只提供服务层入口，未暴露 HTTP 触发（由开奖修订发布流程调用）。
 4. 仍无开奖/回测导出、无日志与费用查询接口；备份列出已具备。

@@ -85,6 +85,7 @@ from dajidali.services.ai.validator import (
     failure_result,
     validate_report,
 )
+from dajidali.services.queue_limits import ensure_capacity_for_submission
 
 API_PREFIX = "/api/v1"
 AI_JOB_KIND = "ai.analyze"
@@ -226,6 +227,9 @@ def submit_ai_job(
         "windows": windows,
         "allowed_strategy_types": allowed,
     }
+    ensure_capacity_for_submission(
+        session, owner_id=owner_id, idempotency_key=idempotency_key
+    )
     try:
         job = JobRepository(session).enqueue(
             AI_JOB_KIND,
