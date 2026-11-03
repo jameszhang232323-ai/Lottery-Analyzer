@@ -19,7 +19,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from dajidali.data.models import (
+    JOB_STATUS_CANCELLED,
     JOB_STATUS_FAILED,
+    JOB_STATUS_PAUSED,
     JOB_STATUS_QUEUED,
     JOB_STATUS_RUNNING,
     JOB_STATUS_SUCCEEDED,
@@ -271,6 +273,68 @@ class JobRepository:
             message=error_message,
             data={"error_code": error_code},
         )
+        self._session.commit()
+        return job
+
+    def request_cancel(self, job_id: int, *, now: datetime | None = None) -> Job:
+        """请求取消任务（设计 11.2）。
+
+        - ``queued`` / ``paused``：立即置为 ``cancelled``，worker 不会再领取；
+        - ``running``：只写入 ``cancel_requested_at`` 并记事件，由 worker 在
+          安全点确认，避免把正在提交的业务事务从中间切断；
+        - 终态：拒绝取消并返回明确错误。
+        """
+        timestamp = as_utc(now or utc_now())
+        job = self.get(job_id)
+        if job is None:
+            raise DomainError("任务不存在", code="JOB_NOT_FOUND", job_id=job_id)
+        if job.status in (JOB_STATUS_QUEUED, JOB_STATUS_PAUSED):
+            job.status = JOB_STATUS_CANCELLED
+            job.finished_at = timestamp
+            job.updated_at = timestamp
+            job.lease_token = None
+            job.lease_expires_at = None
+            job.heartbeat_at = None
+            self._append_event(job.id, "cancelled", now=timestamp, message="排队中被取消")
+            self._session.commit()
+            return job
+        if job.status == JOB_STATUS_RUNNING:
+            if job.cancel_requested_at is None:
+                job.cancel_requested_at = timestamp
+                job.updated_at = timestamp
+                self._append_event(
+                    job.id,
+                    "cancel_requested",
+                    now=timestamp,
+                    message="已请求取消，等待 worker 在安全点确认",
+                )
+                self._session.commit()
+            return job
+        raise DomainError(
+            "任务已结束，无法取消",
+            code="JOB_ALREADY_FINISHED",
+            job_id=job_id,
+            status=job.status,
+        )
+
+    def cancel_requested(self, job_id: int) -> bool:
+        """读取数据库当前值，判断是否已请求取消（越过身份映射缓存）。"""
+        value = self._session.execute(
+            select(Job.cancel_requested_at).where(Job.id == job_id)
+        ).scalar_one_or_none()
+        return value is not None
+
+    def mark_cancelled(self, job_id: int, token: str, *, now: datetime | None = None) -> Job:
+        """worker 确认取消：仅租约持有者可把 running 置为 cancelled。"""
+        timestamp = as_utc(now or utc_now())
+        job = self._require_lease(job_id, token, timestamp)
+        job.status = JOB_STATUS_CANCELLED
+        job.finished_at = timestamp
+        job.updated_at = timestamp
+        job.lease_token = None
+        job.lease_expires_at = None
+        job.heartbeat_at = timestamp
+        self._append_event(job.id, "cancelled", now=timestamp, message="已按请求取消")
         self._session.commit()
         return job
 

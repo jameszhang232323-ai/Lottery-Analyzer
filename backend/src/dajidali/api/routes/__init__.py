@@ -24,9 +24,18 @@ from dajidali.api.deps import AuthenticatedUser, DbSession, require_owner
 from dajidali.api.routes.admin import router as admin_router
 from dajidali.api.routes.auth import router as auth_router
 from dajidali.data.models import JOB_STATUSES, Job, User
+from dajidali.domain.errors import DomainError
+from dajidali.jobs.repository import JobRepository
 from dajidali.security.authorization import NOT_FOUND_MESSAGE, NotFoundError
 
 resource_router = APIRouter(tags=["jobs"])
+
+
+class JobCancelError(DomainError):
+    """任务已结束，无法取消（409）。"""
+
+    code = "JOB_ALREADY_FINISHED"
+    http_status = 409
 
 
 def _decode(raw: str | None) -> Any:
@@ -57,6 +66,9 @@ def job_payload(job: Job) -> dict[str, Any]:
         "result": _decode(job.result_json),
         "error_code": job.error_code,
         "error_message": job.error_message,
+        "cancel_requested_at": (
+            job.cancel_requested_at.isoformat() if job.cancel_requested_at else None
+        ),
     }
 
 
@@ -72,6 +84,56 @@ def read_job(
         raise NotFoundError(NOT_FOUND_MESSAGE)
     require_owner(job.owner_id, user)
     return job_payload(job)
+
+
+@resource_router.post("/jobs/{job_id}/cancel")
+def cancel_job(
+    job_id: int,
+    user: User = AuthenticatedUser,
+    db: Session = DbSession,
+) -> dict[str, Any]:
+    """请求取消任务：排队中立即取消，运行中等待 worker 在安全点确认。"""
+    job = db.get(Job, job_id)
+    if job is None:
+        raise NotFoundError(NOT_FOUND_MESSAGE)
+    require_owner(job.owner_id, user)
+    try:
+        updated = JobRepository(db).request_cancel(job_id)
+    except DomainError as exc:
+        if exc.code == "JOB_ALREADY_FINISHED":
+            raise JobCancelError(exc.message, status=exc.details.get("status")) from exc
+        raise
+    return {
+        "job": job_payload(updated),
+        "cancel_requested": updated.cancel_requested_at is not None,
+    }
+
+
+@resource_router.get("/jobs/{job_id}/events")
+def read_job_events(
+    job_id: int,
+    user: User = AuthenticatedUser,
+    db: Session = DbSession,
+) -> dict[str, Any]:
+    """任务事件流（按发生顺序），供任务中心展示阶段变化。"""
+    job = db.get(Job, job_id)
+    if job is None:
+        raise NotFoundError(NOT_FOUND_MESSAGE)
+    require_owner(job.owner_id, user)
+    events = JobRepository(db).list_events(job_id)
+    return {
+        "items": [
+            {
+                "id": event.id,
+                "event": event.event_type,
+                "message": event.message,
+                "data": _decode(event.data_json),
+                "created_at": event.created_at.isoformat() if event.created_at else None,
+            }
+            for event in events
+        ],
+        "count": len(events),
+    }
 
 
 @resource_router.get("/jobs")

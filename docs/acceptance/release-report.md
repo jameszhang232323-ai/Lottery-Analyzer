@@ -49,7 +49,7 @@
 | 导出与备份 | 完成（CSV/HTML、在线备份、恢复回滚） | 38 项 | **PG 备份未验** |
 | 前端八页 | 完成（真实接口、登录、任务中心） | 85 项 + typecheck/build | **未做浏览器点击级 E2E** |
 | 部署 | CLI + 脚本 + Compose + 文档 | CLI 30 项、脚本语法检查 | **未构建容器** |
-| 运维接口 | 任务完整视图/列表、候选列表、最新开奖、提供商配置状态 | 9 项集成测试 | 本机 |
+| 运维接口 | 任务完整视图/列表、取消与事件流、候选列表、最新开奖、提供商配置状态 | 14 项集成测试 | 本机 |
 
 ## 三、未验证项与所需输入
 
@@ -63,7 +63,8 @@
 
 ## 四、已知功能缺口（不影响主闭环）
 
-1. 任务取消/恢复/事件流：只有 `GET /jobs`、`GET /jobs/{id}`；无 `POST /jobs/{id}/cancel`、`/jobs/{id}/events`。
+1. 任务生命周期：已实现 `GET /jobs`、`GET /jobs/{id}`、`POST /jobs/{id}/cancel`、`GET /jobs/{id}/events`；
+   排队任务立即取消、运行中任务由 worker 在安全点确认；仍无暂停/恢复（resume）。
 2. 来源与 AI 的配置管理：已有 `GET /admin/providers` 配置状态（只返回是否配置与掩码）；仍无 `PUT /admin/providers/{id}` 与连接测试 `POST /admin/providers/{id}/test`。
 3. `GET /draws` 已有 `/draws/latest`；仍无 `sort=desc` 与日期筛选。
 4. 结算只提供服务层入口，未暴露 HTTP 触发（由开奖修订发布流程调用）。

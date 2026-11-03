@@ -13,6 +13,7 @@ from __future__ import annotations
 import threading
 import time
 from collections.abc import Callable, Mapping
+from contextlib import suppress
 from contextvars import ContextVar
 from datetime import datetime
 from types import MappingProxyType
@@ -160,6 +161,8 @@ class JobWorker:
             if heartbeat_thread is not None:
                 heartbeat_thread.join(timeout=max(1.0, self._heartbeat_interval * 2))
 
+        if token is not None and repository.cancel_requested(job.id):
+            return self._mark_cancelled(repository, job, token)
         if failure is not None:
             return self._fail(repository, job, token, code=failure[0], message=failure[1])
         self._complete(repository, job, token, result)
@@ -232,4 +235,16 @@ class JobWorker:
         except DomainError:
             # 租约已过期时由下一轮 recover_expired 重新排队。
             pass
+        return job.id
+
+    def _mark_cancelled(
+        self,
+        repository: JobRepository,
+        job: Job,
+        token: str,
+    ) -> int:
+        """确认取消：取消优先于成功/失败落库。"""
+        # 租约失效时交给下一轮 recover_expired，不吞掉任务。
+        with suppress(DomainError):
+            repository.mark_cancelled(job.id, token, now=self._now_provider())
         return job.id

@@ -491,6 +491,8 @@ class Job(Base):
     result_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 运行中任务的取消请求：用户请求取消后置位，由 worker 在安全点确认取消。
+    cancel_requested_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     schedule_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     scheduled_for: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, default=utc_now)
