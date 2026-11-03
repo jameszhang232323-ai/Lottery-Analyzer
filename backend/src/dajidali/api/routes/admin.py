@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from fastapi import APIRouter
@@ -24,8 +25,68 @@ from dajidali.security.bootstrap import normalize_username
 from dajidali.security.passwords import hash_password
 from dajidali.security.secrets import seal
 from dajidali.security.sessions import revoke_user_sessions
+from dajidali.services.ai.runtime import (
+    AI_API_KEY_ENV,
+    AI_BASE_URL_ENV,
+    AI_MODEL_ENV,
+    ai_configured,
+)
+from dajidali.services.sync import source_from_env
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+
+
+def _masked_key(value: str) -> str | None:
+    """密钥掩码：短密钥一律 ****，长密钥保留首三末四。"""
+    if not value:
+        return None
+    if len(value) <= 8:
+        return "****"
+    return f"{value[:3]}****{value[-4:]}"
+
+
+@router.get("/providers")
+def list_providers(user: User = AdminUser) -> dict[str, Any]:
+    """来源与 AI 的配置状态（管理员）。
+
+    只返回“是否配置”、模型名、地址与密钥掩码；绝不返回密钥本身，
+    也不做任何网络探测——真实连通性验收需要凭证，属 W6 事项。
+    """
+    del user
+    env = os.environ
+    configured = ai_configured()
+    key = (env.get(AI_API_KEY_ENV) or "").strip()
+    source = source_from_env()
+    return {
+        "items": [
+            {
+                "id": "ai",
+                "kind": "ai",
+                "configured": configured,
+                "provider": "openai-compatible" if configured else None,
+                "model": (env.get(AI_MODEL_ENV) or "").strip() or None,
+                "base_url": (env.get(AI_BASE_URL_ENV) or "").strip() or None,
+                "masked_key": _masked_key(key),
+                "note": (
+                    None
+                    if configured
+                    else "未配置 AI 凭证；AI 任务会以 AI_NOT_CONFIGURED 失败"
+                ),
+            },
+            {
+                "id": "source",
+                "kind": "source",
+                "configured": source is not None,
+                "name": getattr(source, "name", None) if source is not None else None,
+                "license_verified": False,
+                "note": (
+                    "真实数据源未准入；当前仅为合成录制源"
+                    if source is not None
+                    else "未配置数据源；采集任务会因缺少处理器失败"
+                ),
+            },
+        ]
+    }
 
 
 class InvalidRoleError(DomainError):

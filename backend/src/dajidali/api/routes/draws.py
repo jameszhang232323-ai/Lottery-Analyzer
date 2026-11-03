@@ -193,6 +193,22 @@ def list_draws(
     }
 
 
+@router.get("/draws/latest")
+def latest_draw(
+    game: str = "ssq",
+    user: User = AuthenticatedUser,
+    db: Session = DbSession,
+) -> dict[str, Any]:
+    """该彩种当前修订中最新的一期（按年份+序号，不是字面排序）。"""
+    del user  # 已登录即可读；公共开奖数据不按用户过滤
+    require_game(db, game)
+    rows = _current_rows(db, game, None, None)
+    if not rows:
+        raise NotFoundError(NOT_FOUND_MESSAGE)
+    row, status = rows[-1]
+    return {"draw": draw_payload(row, is_current=True, current_status=status)}
+
+
 @router.get("/draws/{game}/{issue}")
 def read_draw(
     game: str,
