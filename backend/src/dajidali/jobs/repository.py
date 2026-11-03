@@ -338,6 +338,44 @@ class JobRepository:
         self._session.commit()
         return job
 
+    def pause(self, job_id: int, *, now: datetime | None = None) -> Job:
+        """暂停排队中的任务；运行中的任务不支持暂停（用取消）。"""
+        timestamp = as_utc(now or utc_now())
+        job = self.get(job_id)
+        if job is None:
+            raise DomainError("任务不存在", code="JOB_NOT_FOUND", job_id=job_id)
+        if job.status != JOB_STATUS_QUEUED:
+            raise DomainError(
+                "只有排队中的任务可以暂停",
+                code="JOB_NOT_PAUSABLE",
+                job_id=job_id,
+                status=job.status,
+            )
+        job.status = JOB_STATUS_PAUSED
+        job.updated_at = timestamp
+        self._append_event(job.id, "paused", now=timestamp)
+        self._session.commit()
+        return job
+
+    def resume(self, job_id: int, *, now: datetime | None = None) -> Job:
+        """恢复已暂停的任务，重新进入队列等待领取。"""
+        timestamp = as_utc(now or utc_now())
+        job = self.get(job_id)
+        if job is None:
+            raise DomainError("任务不存在", code="JOB_NOT_FOUND", job_id=job_id)
+        if job.status != JOB_STATUS_PAUSED:
+            raise DomainError(
+                "只有已暂停的任务可以恢复",
+                code="JOB_NOT_RESUMABLE",
+                job_id=job_id,
+                status=job.status,
+            )
+        job.status = JOB_STATUS_QUEUED
+        job.updated_at = timestamp
+        self._append_event(job.id, "resumed", now=timestamp)
+        self._session.commit()
+        return job
+
     def recover_expired(self, now: datetime | None = None) -> int:
         """把租约过期的 running 任务退回 queued 并清空 token；返回恢复数量。"""
         timestamp = as_utc(now or utc_now())

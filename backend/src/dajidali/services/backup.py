@@ -460,6 +460,58 @@ def _sha256_member(zf: zipfile.ZipFile, name: str) -> str:
     return digest.hexdigest()
 
 
+def list_backups(
+    *,
+    data_dir: str | Path | None = None,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """列出 ``backups/`` 下的归档；损坏的归档仍然列出但标注不可用。
+
+    列表只读取清单与哈希，不解包、不返回绝对路径；单个坏包不会让整个列表失败。
+    """
+    root = ensure_data_dir(data_dir)
+    directory = backups_dir(root)
+    if not directory.is_dir():
+        return []
+    candidates = [
+        entry
+        for entry in directory.iterdir()
+        if entry.is_file() and entry.name.endswith(_ARCHIVE_SUFFIX)
+    ]
+    candidates.sort(key=lambda path: path.stat().st_mtime, reverse=True)
+    items: list[dict[str, Any]] = []
+    for path in candidates[: max(1, limit)]:
+        try:
+            validation = validate_backup(path.name, allowed_root=directory)
+        except BackupError:
+            items.append(
+                {
+                    "backup_id": path.name,
+                    "usable": False,
+                    "size_bytes": path.stat().st_size,
+                    "sha256": None,
+                    "created_at": None,
+                    "backup_schema": None,
+                    "table_row_counts": {},
+                    "reason": "INVALID_ARCHIVE",
+                }
+            )
+            continue
+        items.append(
+            {
+                "backup_id": path.name,
+                "usable": True,
+                "sha256": validation.sha256,
+                "size_bytes": validation.size_bytes,
+                "created_at": validation.manifest.get("created_at"),
+                "backup_schema": validation.backup_schema,
+                "table_row_counts": validation.table_row_counts,
+                "reason": None,
+            }
+        )
+    return items
+
+
 def find_backup(backup_id: str, *, data_dir: str | Path | None = None) -> Path:
     """按归档文件名取备份；只接受 ``backups/`` 下的单层文件名。"""
     name = str(backup_id).strip()

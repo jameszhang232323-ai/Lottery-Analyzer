@@ -10,7 +10,7 @@
 | 项 | 结果 | 命令 |
 |---|---|---|
 | 后端静态检查 | 通过 | `backend/.venv/Scripts/python.exe -m ruff check src tests` |
-| 后端测试 | **626 passed, 2 skipped** | `.venv\Scripts\python.exe -m pytest` |
+| 后端测试 | **633 passed, 2 skipped** | `.venv\Scripts\python.exe -m pytest` |
 | 前端类型检查 | 通过 | `node <node> <pnpm> typecheck` |
 | 前端构建 | 通过（主包 252 kB / gzip 83 kB，ECharts 分块） | `... build` |
 | 前端单元测试 | **85 passed** | `... test:unit` |
@@ -49,7 +49,7 @@
 | 导出与备份 | 完成（CSV/HTML、在线备份、恢复回滚） | 38 项 | **PG 备份未验** |
 | 前端八页 | 完成（真实接口、登录、任务中心） | 85 项 + typecheck/build | **未做浏览器点击级 E2E** |
 | 部署 | CLI + 脚本 + Compose + 文档 | CLI 30 项、脚本语法检查 | **未构建容器** |
-| 运维接口 | 任务完整视图/列表、取消与事件流、候选列表、最新开奖、提供商配置状态 | 14 项集成测试 | 本机 |
+| 运维接口 | 任务视图/列表/取消/暂停/恢复/事件、候选列表、最新开奖、提供商状态、备份列表 | 21 项集成测试 | 本机 |
 
 ## 三、未验证项与所需输入
 
@@ -63,12 +63,12 @@
 
 ## 四、已知功能缺口（不影响主闭环）
 
-1. 任务生命周期：已实现 `GET /jobs`、`GET /jobs/{id}`、`POST /jobs/{id}/cancel`、`GET /jobs/{id}/events`；
-   排队任务立即取消、运行中任务由 worker 在安全点确认；仍无暂停/恢复（resume）。
+1. 任务生命周期：已实现 `GET /jobs`、`GET /jobs/{id}`、`POST /jobs/{id}/cancel`、`POST /jobs/{id}/pause`、
+   `POST /jobs/{id}/resume`、`GET /jobs/{id}/events`；排队任务可暂停/取消，运行中任务由 worker 在安全点确认取消。
 2. 来源与 AI 的配置管理：已有 `GET /admin/providers` 配置状态（只返回是否配置与掩码）；仍无 `PUT /admin/providers/{id}` 与连接测试 `POST /admin/providers/{id}/test`。
 3. `GET /draws` 已有 `/draws/latest` 与期号/日期区间筛选；仍无 `sort=desc` 倒序分页。
 4. 结算只提供服务层入口，未暴露 HTTP 触发（由开奖修订发布流程调用）。
-5. 无备份列表、无开奖/回测导出、无日志与费用查询。
+5. 备份列表已实现（`GET /admin/backups`，损坏归档标注原因）；仍无开奖/回测导出、无日志与费用查询。
 6. 多 worker 下候选去重与封存单开仅服务层保证，PG 需补唯一索引/行锁。
 7. 前端 1440/1280 未做像素级截图验收。
 

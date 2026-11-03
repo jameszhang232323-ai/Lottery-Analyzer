@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 
 from dajidali.api.deps import AdminUser, DbSession
 from dajidali.data.models import User
-from dajidali.services.backup import create_backup
+from dajidali.services.backup import create_backup, list_backups
 from dajidali.services.restore import confirm_restore, preview_restore
 
 router = APIRouter(prefix="/admin", tags=["backups"])
@@ -54,6 +54,16 @@ def create_backup_endpoint(
     """创建 SQLite 在线备份；返回清单与备份 ID。"""
     result = create_backup(db)
     return {"backup": result.payload()}
+
+
+@router.get("/backups")
+def list_backups_endpoint(
+    _admin: User = AdminUser,
+    limit: int = 50,
+) -> dict[str, Any]:
+    """列出 ``backups/`` 下的归档；损坏归档标注不可用但不会让列表失败。"""
+    items = list_backups(limit=max(1, min(limit, 200)))
+    return {"items": items, "count": len(items)}
 
 
 @router.post("/restores/preview")

@@ -38,6 +38,13 @@ class JobCancelError(DomainError):
     http_status = 409
 
 
+class JobStateError(DomainError):
+    """任务状态不允许该操作（409）。"""
+
+    code = "JOB_STATE_CONFLICT"
+    http_status = 409
+
+
 def _decode(raw: str | None) -> Any:
     """宽容解析 JSON 列；历史脏数据不应让任务查询 500。"""
     if raw is None:
@@ -107,6 +114,46 @@ def cancel_job(
         "job": job_payload(updated),
         "cancel_requested": updated.cancel_requested_at is not None,
     }
+
+
+@resource_router.post("/jobs/{job_id}/pause")
+def pause_job(
+    job_id: int,
+    user: User = AuthenticatedUser,
+    db: Session = DbSession,
+) -> dict[str, Any]:
+    """暂停排队中的任务；运行中的任务请用取消。"""
+    job = db.get(Job, job_id)
+    if job is None:
+        raise NotFoundError(NOT_FOUND_MESSAGE)
+    require_owner(job.owner_id, user)
+    try:
+        updated = JobRepository(db).pause(job_id)
+    except DomainError as exc:
+        if exc.code == "JOB_NOT_PAUSABLE":
+            raise JobStateError(exc.message, status=exc.details.get("status")) from exc
+        raise
+    return {"job": job_payload(updated)}
+
+
+@resource_router.post("/jobs/{job_id}/resume")
+def resume_job(
+    job_id: int,
+    user: User = AuthenticatedUser,
+    db: Session = DbSession,
+) -> dict[str, Any]:
+    """恢复已暂停的任务，重新进入队列。"""
+    job = db.get(Job, job_id)
+    if job is None:
+        raise NotFoundError(NOT_FOUND_MESSAGE)
+    require_owner(job.owner_id, user)
+    try:
+        updated = JobRepository(db).resume(job_id)
+    except DomainError as exc:
+        if exc.code == "JOB_NOT_RESUMABLE":
+            raise JobStateError(exc.message, status=exc.details.get("status")) from exc
+        raise
+    return {"job": job_payload(updated)}
 
 
 @resource_router.get("/jobs/{job_id}/events")
