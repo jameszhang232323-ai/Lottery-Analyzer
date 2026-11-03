@@ -12,8 +12,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from dajidali.api.deps import AuthenticatedUser, DbSession, require_owner
@@ -60,6 +61,38 @@ def settlement_meta(revision: SettlementRevision) -> dict[str, Any]:
         "created_at": revision.created_at.isoformat() if revision.created_at else None,
         "summary": settlement_payload(revision)["summary"],
     }
+
+
+def batch_summary(batch: CandidateBatch) -> dict[str, Any]:
+    """批次列表项：不含号码行与结算明细，避免列表接口变重。"""
+    return {
+        "id": batch.id,
+        "status": batch.status,
+        "revision": batch.revision,
+        "target_issue": batch.target_issue,
+        "candidate_count": batch.candidate_count,
+        "snapshot_id": batch.snapshot_id,
+        "strategy_version_id": batch.strategy_version_id,
+        "created_at": batch.created_at.isoformat() if batch.created_at else None,
+        "locked_at": batch.locked_at.isoformat() if batch.locked_at else None,
+        "lock_hash": batch.lock_hash,
+    }
+
+
+@router.get("")
+def list_candidates(
+    status: str | None = Query(default=None, max_length=16),
+    limit: int = Query(default=20, ge=1, le=100),
+    user: User = AuthenticatedUser,
+    db: Session = DbSession,
+) -> dict[str, Any]:
+    """本人候选批次列表，最新在前；可按状态过滤。"""
+    statement = select(CandidateBatch).where(CandidateBatch.owner_id == user.id)
+    if status:
+        statement = statement.where(CandidateBatch.status == status)
+    statement = statement.order_by(CandidateBatch.id.desc()).limit(limit)
+    batches = list(db.scalars(statement))
+    return {"items": [batch_summary(batch) for batch in batches], "count": len(batches)}
 
 
 def batch_payload(db: Session, batch: CandidateBatch) -> dict[str, Any]:
