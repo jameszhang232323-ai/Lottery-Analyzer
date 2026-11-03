@@ -979,3 +979,60 @@ event.listen(CandidateBatch, "before_update", _guard_locked_candidate_batch)
 event.listen(CandidateBatch, "before_delete", _guard_locked_candidate_delete)
 event.listen(SettlementRevision, "before_update", _guard_settlement_update)
 event.listen(SettlementRevision, "before_delete", _reject_immutable_delete)
+
+
+# ---------------------------------------------------------------------------
+# 任务 09：AI 调用记录（设计文档 6.1、8.2—8.4）
+# 一次分析一行：请求证据、当次响应、校验结果与用量分开保存；凭证不落库。
+# ---------------------------------------------------------------------------
+
+AI_RUN_OUTCOMES: tuple[str, ...] = ("succeeded", "invalid", "unknown", "failed")
+"""``unknown`` 表示已发出请求但超时/丢失响应，结果未知且不自动重试。"""
+
+AI_RUN_OUTCOME_SUCCEEDED = "succeeded"
+AI_RUN_OUTCOME_INVALID = "invalid"
+AI_RUN_OUTCOME_UNKNOWN = "unknown"
+AI_RUN_OUTCOME_FAILED = "failed"
+
+
+class AiRun(Base):
+    """一次 AI 分析的不可覆盖记录：请求、响应、校验与用量。
+
+    ``request_json`` 是发送给模型的 ``AnalysisEvidenceV1``（含用户问题，属允许
+    内容）；``response_json`` 为可解析的模型输出，解析失败时保存截断的原始文本，
+    超时/异常时为空。任何字段都不保存服务密钥。
+    """
+
+    __tablename__ = "ai_run"
+    __table_args__ = (
+        CheckConstraint(
+            "outcome IN ({})".format(", ".join(repr(s) for s in AI_RUN_OUTCOMES)),
+            name="ck_ai_run_outcome",
+        ),
+        Index("ix_ai_run_owner_created", "owner_id", "created_at"),
+        Index("ix_ai_run_job", "job_id"),
+        Index("ix_ai_run_request_id", "request_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    owner_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("user.id", name="fk_ai_run_owner", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    request_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    snapshot_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    provider: Mapped[str] = mapped_column(String(64), nullable=False)
+    model: Mapped[str] = mapped_column(String(128), nullable=False)
+    prompt_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    request_json: Mapped[str] = mapped_column(Text, nullable=False)
+    response_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    validation_json: Mapped[str] = mapped_column(Text, nullable=False)
+    usage_json: Mapped[str] = mapped_column(Text, nullable=False)
+    outcome: Mapped[str] = mapped_column(String(16), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, default=utc_now)
+    job_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("job.id", name="fk_ai_run_job", ondelete="SET NULL"),
+        nullable=True,
+    )

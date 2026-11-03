@@ -1,0 +1,23 @@
+{
+  "schema_version": "1.0",
+  "request_id": "example-ai-001",
+  "snapshot_hash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  "observations": [
+    {
+      "fact_ids": ["ssq.red.01.count.w100"],
+      "interpretation": "Red ball 01 appeared 18 times in the 100-draw window."
+    }
+  ],
+  "strategy_proposals": [
+    {
+      "strategy_type": "S1",
+      "window": 100,
+      "alpha_periods": 30,
+      "lambda": 0.1,
+      "conditions": null,
+      "reason_fact_ids": ["ssq.red.01.count.w100"],
+      "validation_status": "proposed"
+    }
+  ],
+  "limitations": ["Historical statistics do not imply a future advantage."]
+}

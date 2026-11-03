@@ -1,0 +1,23 @@
+{
+  "schema_version": "1.0",
+  "request_id": "example-ai-001",
+  "snapshot_hash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+  "observations": [
+    {
+      "fact_ids": ["ssq.red.99.count.w100"],
+      "interpretation": "A fabricated claim of 42 draws is not supported by the evidence."
+    }
+  ],
+  "strategy_proposals": [
+    {
+      "strategy_type": "S1",
+      "window": 100,
+      "alpha_periods": 30,
+      "lambda": 0.9,
+      "reason_fact_ids": ["ssq.red.99.count.w100"],
+      "validation_status": "verified"
+    }
+  ],
+  "limitations": ["See https://example.invalid/report for details."],
+  "debug": true
+}

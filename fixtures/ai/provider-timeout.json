@@ -1,0 +1,7 @@
+{
+  "outcome": "unknown",
+  "duration_ms": 60000,
+  "error_code": "AI_TIMEOUT",
+  "error_message": "Simulated timeout: request may have been billed, do not retry automatically.",
+  "retry": false
+}

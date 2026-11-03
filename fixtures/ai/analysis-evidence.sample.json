@@ -1,0 +1,43 @@
+{
+  "schema_version": "1.0",
+  "request_id": "example-ai-001",
+  "game": "ssq",
+  "snapshot_hash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  "as_of_issue": "2026014",
+  "sample_n": 100,
+  "quality": {
+    "effective_n": 100,
+    "missing": 0,
+    "conflicts": 0,
+    "verification": "structural"
+  },
+  "windows": [30, 100],
+  "facts": [
+    {
+      "fact_id": "ssq.red.01.count.w100",
+      "value": 18,
+      "unit": "draws",
+      "sample_n": 100,
+      "window": 100,
+      "metric_version": "frequency-v1"
+    },
+    {
+      "fact_id": "ssq.red.01.frequency.w100",
+      "value": 0.18,
+      "unit": "fraction",
+      "sample_n": 100,
+      "window": 100,
+      "metric_version": "frequency-v1"
+    },
+    {
+      "fact_id": "ssq.red.sum.mean.w30",
+      "value": 102.4,
+      "unit": "sum",
+      "sample_n": 30,
+      "window": 30,
+      "metric_version": "frequency-v1"
+    }
+  ],
+  "question": "Explain the frequency evidence and propose one backtestable option.",
+  "allowed_strategy_types": ["S0", "S1"]
+}

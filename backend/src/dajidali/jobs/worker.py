@@ -13,7 +13,9 @@ from __future__ import annotations
 import threading
 import time
 from collections.abc import Callable, Mapping
+from contextvars import ContextVar
 from datetime import datetime
+from types import MappingProxyType
 from typing import Any
 
 from sqlalchemy.orm import Session, sessionmaker
@@ -24,6 +26,57 @@ from dajidali.jobs.repository import JobRepository, load_job_payload
 
 JobHandler = Callable[[dict[str, Any]], Any]
 DEFAULT_HEARTBEAT_INTERVAL_SECONDS = 10.0
+
+_REGISTERED_HANDLERS: dict[str, JobHandler] = {}
+"""进程级处理器注册表；服务层按 ``kind`` 注册实现，worker 实例自带处理器优先。"""
+
+_CURRENT_JOB: ContextVar[Job | None] = ContextVar("dajidali_current_job", default=None)
+"""当前正在执行的任务；处理器只读，用于把结果关联回 ``job_id``/``owner_id``。"""
+
+
+def register_handler(kind: str, handler: JobHandler) -> None:
+    """注册按 ``kind`` 分发的处理器；重复注册覆盖旧实现（便于测试替换）。"""
+    if not isinstance(kind, str) or not kind:
+        raise ValueError("任务类型必须为非空字符串")
+    if not callable(handler):
+        raise TypeError("任务处理器必须可调用")
+    _REGISTERED_HANDLERS[kind] = handler
+
+
+def unregister_handler(kind: str) -> None:
+    """移除已注册的处理器；不存在时是空操作。"""
+    _REGISTERED_HANDLERS.pop(kind, None)
+
+
+def registered_handler(kind: str) -> JobHandler | None:
+    """返回已注册的处理器；未注册返回 ``None``。"""
+    return _REGISTERED_HANDLERS.get(kind)
+
+
+def registered_handlers() -> Mapping[str, JobHandler]:
+    """只读视图：当前进程注册的全部处理器。"""
+    return MappingProxyType(_REGISTERED_HANDLERS)
+
+
+def current_job() -> Job | None:
+    """当前 worker 正在执行的任务；不在任务上下文中时返回 ``None``。
+
+    处理器只应读取 ``id``/``owner_id``/``snapshot_hash`` 等元数据，不要修改
+    任务对象；任务状态仍只能由 :class:`JobRepository` 变更。
+    """
+    return _CURRENT_JOB.get()
+
+
+def current_job_id() -> int | None:
+    """当前任务的 id；便于处理器把结果写回 ``job_id`` 外键。"""
+    job = current_job()
+    return None if job is None else job.id
+
+
+def current_job_owner_id() -> int | None:
+    """当前任务的归属用户 id；系统任务可能为 ``None``。"""
+    job = current_job()
+    return None if job is None else job.owner_id
 
 
 class JobWorker:
@@ -80,7 +133,7 @@ class JobWorker:
 
     def _run_claimed(self, repository: JobRepository, job: Job) -> int:
         token = job.lease_token
-        handler = self._handlers.get(job.kind)
+        handler = self._handlers.get(job.kind) or _REGISTERED_HANDLERS.get(job.kind)
         if handler is None:
             return self._fail(
                 repository,
@@ -94,6 +147,7 @@ class JobWorker:
         heartbeat_thread = self._start_heartbeat(job.id, token, stop_heartbeat)
         failure: tuple[str, str] | None = None
         result: Any = None
+        job_token = _CURRENT_JOB.set(job)
         try:
             result = handler(load_job_payload(job))
         except DomainError as exc:
@@ -101,6 +155,7 @@ class JobWorker:
         except Exception as exc:  # 业务处理器异常必须落库，不能静默丢失任务
             failure = ("JOB_FAILED", str(exc)[:500])
         finally:
+            _CURRENT_JOB.reset(job_token)
             stop_heartbeat.set()
             if heartbeat_thread is not None:
                 heartbeat_thread.join(timeout=max(1.0, self._heartbeat_interval * 2))
