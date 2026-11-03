@@ -1,0 +1,43 @@
+# Docker 构建上下文排除项：只保留构建真正需要的源码与配置。
+.git
+.github
+.pnpm-store
+.tmp
+.test-tmp
+
+# Python 环境与缓存
+backend/.venv
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/.ruff_cache
+**/*.egg-info
+
+# Node 依赖与产物（前端由镜像内 pnpm 重新安装并构建）
+web/node_modules
+web/dist
+web/.vite
+
+# 运行时数据与备份（绝不进入镜像）
+data
+backups
+artifacts
+*.db
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+
+# 本地凭证
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# 文档与编辑器
+docs
+*.md
+!README.md
+.idea
+.vscode
+Thumbs.db

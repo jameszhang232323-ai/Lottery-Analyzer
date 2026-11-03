@@ -33,9 +33,8 @@ RUN groupadd --system --gid 10001 dajidali \
 
 WORKDIR /app
 COPY backend/requirements.lock ./requirements.lock
-# psycopg 是 PostgreSQL 服务器模式的运行时驱动；当前依赖锁文件尚未收入该包，
-# 故在镜像构建时显式安装。版本范围待 G0 依赖锁更新后固定。
-RUN pip install --no-cache-dir -r requirements.lock "psycopg[binary]>=3.2,<4"
+# PostgreSQL 驱动（psycopg + psycopg-binary）已固定在依赖锁中，镜像与开发环境一致。
+RUN pip install --no-cache-dir -r requirements.lock
 COPY backend/src ./src
 COPY backend/migrations ./migrations
 COPY backend/alembic.ini ./alembic.ini

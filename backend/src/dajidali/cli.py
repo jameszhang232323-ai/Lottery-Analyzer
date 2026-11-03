@@ -335,6 +335,27 @@ def cmd_serve_api(
     return 0
 
 
+def _register_builtin_handlers(
+    factory: sessionmaker[Session],
+    environ: Mapping[str, str] | None,
+) -> bool:
+    """把已配置的内置业务处理器注册到当前 worker 进程。
+
+    目前只有 ``ai.analyze``：凭证齐全时才注册；未配置时保持未注册，
+    相关任务会以 ``AI_NOT_CONFIGURED`` 明确失败，而不是静默成功。
+    """
+    from dajidali.services.ai.runtime import provider_from_env
+
+    provider = provider_from_env(environ)
+    if provider is None:
+        return False
+
+    from dajidali.api.routes.ai_jobs import register_ai_handler
+
+    register_ai_handler(factory, provider)
+    return True
+
+
 def cmd_serve_worker(
     args: argparse.Namespace,
     *,
@@ -350,6 +371,8 @@ def cmd_serve_worker(
     if worker is None:
         engine = create_engine_from_url(context.database_url)
         factory = create_session_factory(engine)
+        if _register_builtin_handlers(factory, environ):
+            print("已注册内置处理器：ai.analyze（provider 来自环境变量）。")
         handlers = dict(job_handlers or {})
         if not handlers and not registered_handlers():
             print("注意：当前进程尚未注册业务任务处理器；未知任务类型会被标记失败。")
