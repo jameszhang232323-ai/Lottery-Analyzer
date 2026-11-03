@@ -1,9 +1,9 @@
 /**
  * 开奖数据读取辅助。
  *
- * 后端 `GET /draws` 只提供按“期号升序 + 游标”的翻页，没有倒序/最新参数，
- * 因此要得到最新期必须从最早一页向后翻完。这里把该事实收敛到一处，并对
- * 游标循环做防护；页面不自行拼接“期号 + 1”猜测最新期。
+ * 后端 `GET /draws` 只提供按“期号升序 + 游标”的翻页；要拿最新一期，
+ * 优先用 `GET /draws/latest`，否则才从最早一页向后翻完。这里把该事实收敛到
+ * 一处，并对游标循环做防护；页面不自行拼接“期号 + 1”猜测最新期。
  */
 
 import { ApiError, apiGet, withQuery } from './client'
@@ -18,6 +18,19 @@ function contractError(code: string, message: string): ApiError {
     { code, message, details: {}, request_id: '' },
     'unexpected',
   )
+}
+
+/** 最新一期（后端 `/draws/latest`）；无数据时返回 null。 */
+export async function fetchLatestDraw(game = 'ssq'): Promise<Draw | null> {
+  try {
+    const payload = await apiGet<{ draw: Draw }>(
+      withQuery('/draws/latest', { game }),
+    )
+    return payload.draw
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) return null
+    throw error
+  }
 }
 
 export async function fetchAllDraws(game = 'ssq', maxPages = MAX_PAGES): Promise<Draw[]> {

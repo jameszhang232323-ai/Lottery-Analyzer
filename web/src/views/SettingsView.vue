@@ -17,6 +17,8 @@ import type {
   ExportResponse,
   RestorePreview,
   RestorePreviewResponse,
+  ProviderStatus,
+  ProvidersResponse,
   SecretReference,
   SecretsResponse,
   UserInfo,
@@ -62,6 +64,10 @@ const disableError = ref<ApiError | null>(null)
 const secrets = ref<SecretReference[]>([])
 const secretsLoading = ref(false)
 const secretsError = ref<ApiError | null>(null)
+
+const providers = ref<ProviderStatus[]>([])
+const providersLoading = ref(false)
+const providersError = ref<ApiError | null>(null)
 
 const backup = ref<Backup | null>(null)
 const backupLoading = ref(false)
@@ -182,6 +188,30 @@ async function loadSecrets(): Promise<void> {
   }
 }
 
+async function loadProviders(): Promise<void> {
+  providersLoading.value = true
+  providersError.value = null
+  try {
+    const payload = await apiGet<ProvidersResponse>('/admin/providers')
+    providers.value = payload.items
+  } catch (caught) {
+    providersError.value = toApiError(caught)
+  } finally {
+    providersLoading.value = false
+  }
+}
+
+function providerDetail(item: ProviderStatus): string {
+  if (item.kind === 'ai') {
+    if (!item.configured) return '—'
+    const parts = [item.model, item.base_url, item.masked_key].filter(
+      (value): value is string => Boolean(value),
+    )
+    return parts.join(' · ') || '—'
+  }
+  return item.name ? `${item.name}${item.license_verified ? '（已准入）' : '（未准入）'}` : '—'
+}
+
 async function createBackup(): Promise<void> {
   backupError.value = null
   backupLoading.value = true
@@ -259,6 +289,7 @@ onMounted(() => {
   if (auth.isAdmin) {
     void loadUsers()
     void loadSecrets()
+    void loadProviders()
   }
   void system.refresh()
 })
@@ -303,6 +334,43 @@ onMounted(() => {
     </SectionCard>
 
     <template v-if="auth.isAdmin">
+      <SectionCard
+        title="数据源与 AI 状态"
+        description="GET /admin/providers；只返回是否配置与密钥掩码，不返回密钥本身"
+        wide
+      >
+        <p v-if="providersLoading" class="loading-note">正在读取配置状态…</p>
+        <ErrorNote :error="providersError" context="读取配置状态" />
+        <div class="table-shell">
+          <table>
+            <thead>
+              <tr>
+                <th>类型</th>
+                <th>状态</th>
+                <th>详情</th>
+                <th>说明</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="item in providers" :key="item.id">
+                <td>{{ item.kind === 'ai' ? 'AI 服务' : '数据源' }}</td>
+                <td>
+                  <StatusPill
+                    :label="item.configured ? '已配置' : '未配置'"
+                    :tone="item.configured ? 'ok' : 'warn'"
+                  />
+                </td>
+                <td>{{ providerDetail(item) }}</td>
+                <td>{{ item.note ?? '—' }}</td>
+              </tr>
+              <tr v-if="!providers.length && !providersLoading">
+                <td colspan="4" class="muted">暂无配置状态</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </SectionCard>
+
       <SectionCard title="用户管理" description="GET/POST /admin/users；禁用会撤销会话" wide>
         <p v-if="usersLoading" class="loading-note">正在读取用户列表…</p>
         <ErrorNote :error="usersError" context="读取用户" />

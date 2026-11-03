@@ -609,3 +609,21 @@ export interface SecretReference {
 export interface SecretsResponse {
   items: SecretReference[]
 }
+
+/** 来源 / AI 的配置状态；只含是否配置与掩码，不含密钥。 */
+export interface ProviderStatus {
+  id: string
+  kind: 'ai' | 'source'
+  configured: boolean
+  provider?: string | null
+  model?: string | null
+  base_url?: string | null
+  masked_key?: string | null
+  name?: string | null
+  license_verified?: boolean
+  note?: string | null
+}
+
+export interface ProvidersResponse {
+  items: ProviderStatus[]
+}

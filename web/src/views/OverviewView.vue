@@ -88,6 +88,7 @@ async function sync(): Promise<void> {
 }
 
 onMounted(() => {
+  void draws.loadLatest()
   if (!system.datasetLoadedAt) void load()
 })
 </script>
