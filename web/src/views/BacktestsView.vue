@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 
 import {
+  apiDownload,
   apiGet,
   apiPost,
   clientError,
@@ -30,14 +31,14 @@ import { useJobsStore } from '../stores/jobs'
 import {
   describeJobStatus,
   formatCount,
-  formatJsonValue,
-  formatSyncTime,
+  formatJsonValue,  formatSyncTime,
 } from '../stores/selectors'
 import {
   isSeedHex,
   parseNumberList,
   randomSeedHex,
 } from '../utils/numbers'
+import { saveBlob } from '../utils/download'
 
 const draws = useDrawsStore()
 const jobs = useJobsStore()
@@ -64,6 +65,8 @@ const jobId = ref<number | null>(null)
 const submitting = ref(false)
 const loadingResult = ref(false)
 const error = ref<ApiError | null>(null)
+const exportLoading = ref(false)
+const exportError = ref<ApiError | null>(null)
 
 const trackedJob = computed(() => (jobId.value === null ? null : jobs.find(jobId.value) ?? null))
 const jobStatus = computed(() => (trackedJob.value ? describeJobStatus(trackedJob.value.status) : null))
@@ -204,6 +207,21 @@ async function loadBacktest(id: number): Promise<void> {
     error.value = toApiError(caught)
   } finally {
     loadingResult.value = false
+  }
+}
+
+/** 导出当前回测结果：CSV 逐期明细，JSON 完整计划与指标。 */
+async function exportBacktest(format: 'csv' | 'json'): Promise<void> {
+  if (!backtest.value) return
+  exportError.value = null
+  exportLoading.value = true
+  try {
+    const file = await apiDownload(`/backtests/${backtest.value.id}/export?format=${format}`)
+    saveBlob(file.blob, file.filename)
+  } catch (caught) {
+    exportError.value = toApiError(caught)
+  } finally {
+    exportLoading.value = false
   }
 }
 
@@ -490,8 +508,7 @@ onMounted(() => {
         </div>
       </SectionCard>
 
-      <SectionCard title="逐期结果" description="候选哈希、命中明细、基线与排除原因" wide>
-        <div class="table-shell">
+      <SectionCard title="逐期结果" description="候选哈希、命中明细、基线与排除原因" wide>        <div class="table-shell">
           <table class="data-table">
             <thead>
               <tr>
@@ -522,6 +539,27 @@ onMounted(() => {
           共 {{ backtest.counts.periods }} 期，可评价 {{ backtest.counts.evaluated }} 期，排除
           {{ backtest.counts.excluded }} 期；排除期不混入完整报告。
         </p>
+        <ErrorNote :error="exportError" context="导出回测结果" />
+        <template #actions>
+          <div class="action-row">
+            <button
+              type="button"
+              class="action-button"
+              :disabled="exportLoading"
+              @click="exportBacktest('csv')"
+            >
+              {{ exportLoading ? '导出中…' : '导出 CSV' }}
+            </button>
+            <button
+              type="button"
+              class="ghost-button"
+              :disabled="exportLoading"
+              @click="exportBacktest('json')"
+            >
+              导出 JSON
+            </button>
+          </div>
+        </template>
       </SectionCard>
     </template>
 
@@ -529,7 +567,7 @@ onMounted(() => {
       <EmptyState
         title="暂无回测结果"
         description="创建快照并运行回测；任务成功后自动读取指标、B0/B1、Bootstrap 区间与逐期摘要。"
-        hint="后端的回测结果没有导出端点；前端不伪造报告下载。"
+        hint="导出 CSV 为逐期明细，JSON 含完整计划、指标与区间。"
       />
       <p class="muted">最近读取时间：{{ formatSyncTime(draws.loadedAt) }}。</p>
     </SectionCard>
