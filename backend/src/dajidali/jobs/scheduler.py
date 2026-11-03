@@ -9,13 +9,16 @@ SQLite 用条件 UPDATE 抢占过期租约；PG 的行锁实现留给后续任�
 
 from __future__ import annotations
 
+import contextlib
 import secrets
+import time
+from collections.abc import Callable
 from datetime import datetime, timedelta
 from typing import Any
 
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from dajidali.data.models import (
     JOB_STATUS_QUEUED,
@@ -207,3 +210,63 @@ class SchedulerRepository:
                 Job.scheduled_for == scheduled_for,
             )
         )
+
+
+def run_scheduler_forever(
+    session_factory: sessionmaker[Session],
+    *,
+    schedule_id: str = "default",
+    interval: float = 30.0,
+    lease_seconds: int = DEFAULT_SCHEDULER_LEASE_SECONDS,
+    tick: Callable[[SchedulerRepository, datetime], Any] | None = None,
+    stop_event: Any | None = None,
+    max_iterations: int | None = None,
+    now_provider: Callable[[], datetime] = utc_now,
+) -> int:
+    """独立调度器循环：每个周期持有 DB 租约，执行 ``tick`` 后释放。
+
+    - 租约只覆盖单个调度周期，避免调度器崩溃后锁死；同一时刻仍只有一个
+      调度器能执行 ``tick``；
+    - ``tick`` 负责按时间槽调用 :meth:`SchedulerRepository.enqueue_scheduled`，
+      幂等去重由 ``(schedule_id, scheduled_for)`` 唯一键保证；
+    - 首版业务调度项尚未注册时，``tick`` 为空，循环只维护租约；
+    - ``max_iterations=1`` 供 CLI ``--once`` 与部署前验证使用。
+    """
+    if not schedule_id:
+        raise ValueError("schedule_id 不能为空")
+    if interval <= 0:
+        raise ValueError("interval 必须为正数")
+    if max_iterations is not None and max_iterations < 0:
+        raise ValueError("max_iterations 不能为负数")
+
+    iterations = 0
+    while max_iterations is None or iterations < max_iterations:
+        if stop_event is not None and stop_event.is_set():
+            break
+        timestamp = as_utc(now_provider())
+        with session_factory() as session:
+            repository = SchedulerRepository(session, lease_seconds=lease_seconds)
+            token = repository.acquire(schedule_id, timestamp, lease_seconds)
+            if token is not None:
+                try:
+                    if tick is not None:
+                        tick(repository, timestamp)
+                finally:
+                    # 周期过长导致租约过期时，由下一周期重新竞争；不吞掉 tick 异常。
+                    with contextlib.suppress(DomainError):
+                        repository.release(schedule_id, token)
+        iterations += 1
+        if max_iterations is not None and iterations >= max_iterations:
+            break
+        if stop_event is not None:
+            wait = getattr(stop_event, "wait", None)
+            if callable(wait):
+                if wait(interval):
+                    break
+            elif stop_event.is_set():
+                break
+            else:
+                time.sleep(interval)
+        else:
+            time.sleep(interval)
+    return iterations
