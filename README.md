@@ -62,6 +62,14 @@ pnpm build
 powershell -ExecutionPolicy Bypass -File tooling/check.ps1   # ruff + pytest + typecheck + build + 单测
 ```
 
+端到端烟测（需要先启动 API 与 worker，worker 设置 `DAJIDALI_SOURCE=recorded`）：
+
+```powershell
+backend\.venv\Scripts\python.exe tooling\smoke_local.py --base-url http://127.0.0.1:8000 --username admin --password ***
+```
+
+它会跑通「采集 → 覆盖 → 快照 → 统计 → 候选」闭环；任何一步失败都以非零码退出。
+
 并行波次、文件所有权和可复制到独立会话的任务说明见[并行开发编排](docs/plans/2026-11-02-parallel-development.md)。
 
 ## 约定
