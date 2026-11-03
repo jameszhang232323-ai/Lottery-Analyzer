@@ -10,7 +10,7 @@
 | 项 | 结果 | 命令 |
 |---|---|---|
 | 后端静态检查 | 通过 | `backend/.venv/Scripts/python.exe -m ruff check src tests` |
-| 后端测试 | **652 passed, 2 skipped** | `.venv\Scripts\python.exe -m pytest` |
+| 后端测试 | **656 passed, 2 skipped** | `.venv\Scripts\python.exe -m pytest` |
 | 前端类型检查 | 通过 | `node <node> <pnpm> typecheck` |
 | 前端构建 | 通过（主包 252 kB / gzip 83 kB，ECharts 分块） | `... build` |
 | 前端单元测试 | **85 passed** | `... test:unit` |
@@ -68,7 +68,7 @@
 2. 来源与 AI 的配置**写入**：已有 `GET /admin/providers` 状态查询；仍无 `PUT /admin/providers/{id}` 与连接测试 `POST /admin/providers/{id}/test`。
 3. 结算已提供服务层入口与管理员触发接口（`POST /admin/settlements/reconcile`，幂等）；
    仍缺自动触发（开奖修订发布后由采集流程调用）。
-4. 开奖数据导出（CSV/JSON）已实现并接入前端；仍缺回测报告导出、无日志与费用查询接口。
+4. 开奖数据与回测结果导出（CSV/JSON）均已实现并接入前端；仍缺日志与费用查询接口。
 5. 多 worker 下候选去重与封存单开仅服务层保证，PG 需补唯一索引/行锁。
 6. 前端 1440/1280 未做像素级截图验收。
 

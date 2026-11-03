@@ -15,9 +15,13 @@
 
 from __future__ import annotations
 
+import csv
+import io
+import json
+from datetime import UTC, datetime
 from typing import Any, Literal
 
-from fastapi import APIRouter, FastAPI, Header, status
+from fastapi import APIRouter, FastAPI, Header, Response, status
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
@@ -33,6 +37,7 @@ from dajidali.services.backtests import (
     backtest_payload,
     submit_backtest_job,
 )
+from dajidali.services.exports import sanitize_csv_cell
 
 router = APIRouter(tags=["backtests"])
 
@@ -138,6 +143,69 @@ def read_backtest(
     """读取本人回测结果：计划、指标、区间与逐期摘要。"""
     run = _require_visible_run(db, run_id, user)
     return {"backtest": backtest_payload(db, run)}
+
+
+@router.get("/backtests/{run_id}/export")
+def export_backtest(
+    run_id: int,
+    format: str = "csv",
+    user: User = AuthenticatedUser,
+    db: Session = DbSession,
+) -> Response:
+    """导出本人回测结果：CSV 为逐期明细，JSON 为完整计划/指标/区间。
+
+    导出按 owner 隔离；CSV 单元格做公式注入防护，命中与基线以紧凑 JSON 文本保存。
+    """
+    if format not in {"csv", "json"}:
+        raise BacktestJobError(
+            "format 只能是 csv 或 json",
+            code="INVALID_FORMAT",
+            format=format,
+        )
+    run = _require_visible_run(db, run_id, user)
+    payload = backtest_payload(db, run)
+
+    if format == "csv":
+        buffer = io.StringIO()
+        writer = csv.writer(buffer, lineterminator="\n")
+        writer.writerow(["期号", "阶段", "候选哈希", "命中", "基线", "排除原因"])
+        for period in payload["periods"]:
+            writer.writerow(
+                [
+                    sanitize_csv_cell(str(period["issue"])),
+                    sanitize_csv_cell(str(period["stage"])),
+                    sanitize_csv_cell(str(period["candidate_hash"] or "")),
+                    sanitize_csv_cell(json.dumps(period["hits"], ensure_ascii=False)),
+                    sanitize_csv_cell(
+                        json.dumps(period["baseline"], ensure_ascii=False)
+                        if period["baseline"] is not None
+                        else ""
+                    ),
+                    sanitize_csv_cell(str(period["excluded_reason"] or "")),
+                ]
+            )
+        content = ("\ufeff" + buffer.getvalue()).encode("utf-8")
+        return Response(
+            content=content,
+            media_type="text/csv; charset=utf-8",
+            headers={
+                "Content-Disposition": f'attachment; filename="backtest-{run_id}.csv"',
+            },
+        )
+
+    document = {
+        "schema": "backtest-export-v1",
+        "generated_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+        "disclaimer": "研究用途，不构成购彩建议；历史回测不代表未来表现。",
+        "backtest": payload,
+    }
+    return Response(
+        content=json.dumps(document, ensure_ascii=False).encode("utf-8"),
+        media_type="application/json",
+        headers={
+            "Content-Disposition": f'attachment; filename="backtest-{run_id}.json"',
+        },
+    )
 
 
 def register(app: FastAPI, *, prefix: str = API_PREFIX) -> None:
