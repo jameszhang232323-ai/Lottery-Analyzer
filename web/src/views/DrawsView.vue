@@ -2,6 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 
 import {
+  apiDownload,
   apiGet,
   apiPost,
   clientError,
@@ -28,6 +29,7 @@ import { useJobLauncher } from '../composables/useJobLauncher'
 import { useAuthStore } from '../stores/auth'
 import { useDrawsStore } from '../stores/draws'
 import { useJobsStore } from '../stores/jobs'
+import { saveBlob } from '../utils/download'
 import {
   describeCoverage,
   describeDrawQuality,
@@ -48,6 +50,9 @@ const endIssue = ref('')
 const startDate = ref('')
 const endDate = ref('')
 const order = ref<'asc' | 'desc'>('asc')
+const exportFormat = ref<'csv' | 'json'>('csv')
+const exporting = ref(false)
+const exportError = ref<ApiError | null>(null)
 const limit = ref(50)
 const items = ref<Draw[]>([])
 const nextCursor = ref<string | null>(null)
@@ -157,6 +162,28 @@ async function fetchPage(cursor: string | null, resetStack = false): Promise<voi
 
 async function search(): Promise<void> {
   await fetchPage(null, true)
+}
+
+/** 导出当前筛选结果；CSV 带 BOM，Excel 直接打开不乱码。 */
+async function exportDraws(): Promise<void> {
+  exportError.value = null
+  exporting.value = true
+  try {
+    const path = withQuery('/draws/export', {
+      game: GAME,
+      start_issue: startIssue.value.trim() || null,
+      end_issue: endIssue.value.trim() || null,
+      start_date: startDate.value || null,
+      end_date: endDate.value || null,
+      format: exportFormat.value,
+    })
+    const file = await apiDownload(path)
+    saveBlob(file.blob, file.filename)
+  } catch (caught) {
+    exportError.value = toApiError(caught)
+  } finally {
+    exporting.value = false
+  }
 }
 
 async function nextPage(): Promise<void> {
@@ -378,6 +405,19 @@ onMounted(() => {
         当前第 {{ cursorStack.length }} 页，共 {{ items.length }} 条；后端游标只记录上一页最后一期。
         期号区间与日期区间可同时使用（取交集）。
       </p>
+      <div class="action-row">
+        <label class="field">
+          <span class="field-label">导出格式</span>
+          <select v-model="exportFormat" class="field-input">
+            <option value="csv">CSV（Excel 可直接打开）</option>
+            <option value="json">JSON</option>
+          </select>
+        </label>
+        <button type="button" class="ghost-button" :disabled="exporting" @click="exportDraws">
+          {{ exporting ? '导出中…' : '导出当前筛选结果' }}
+        </button>
+      </div>
+      <ErrorNote :error="exportError" context="导出开奖数据" />
       <template #actions>
         <div class="action-row">
           <button type="button" class="action-button" :disabled="pageLoading" @click="search">
