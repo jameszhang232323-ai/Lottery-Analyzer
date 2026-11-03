@@ -18,7 +18,11 @@ from sqlalchemy.engine import Engine
 from dajidali import __version__
 from dajidali.api.deps import install_session_factory
 from dajidali.api.errors import ErrorBody, error_response
-from dajidali.api.routes import admin_router, auth_router, resource_router
+from dajidali.api.routes import (
+    admin_router,
+    auth_router,
+    resource_router,
+)
 from dajidali.api.routes import (
     ai_jobs as ai_jobs_routes,
 )
@@ -39,6 +43,9 @@ from dajidali.api.routes import (
 )
 from dajidali.api.routes import (
     draws as draws_routes,
+)
+from dajidali.api.routes import (
+    snapshots as snapshots_routes,
 )
 from dajidali.api.routes import (
     sync_jobs as sync_jobs_routes,
@@ -143,6 +150,7 @@ def create_app(engine: Engine | None = None) -> FastAPI:
     # 任务 04/05/06/08/09/10 的路由由各自模块提供 register()；
     # 重复调用会跳过，便于测试与装配复用。
     draws_routes.register(app, prefix=API_PREFIX)
+    snapshots_routes.register(app, prefix=API_PREFIX)
     sync_jobs_routes.register(app, prefix=API_PREFIX)
     analysis_jobs_routes.register(app, prefix=API_PREFIX)
     candidate_jobs_routes.register(app, prefix=API_PREFIX)
