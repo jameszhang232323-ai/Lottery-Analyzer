@@ -23,6 +23,7 @@ import ErrorNote from '../components/ErrorNote.vue'
 import SectionCard from '../components/SectionCard.vue'
 import StatusPill from '../components/StatusPill.vue'
 import { useCandidatesStore } from '../stores/candidates'
+import { useAuthStore } from '../stores/auth'
 import { useJobsStore } from '../stores/jobs'
 import {
   describeCandidateStatus,
@@ -33,6 +34,7 @@ import { saveBlob } from '../utils/download'
 
 const route = useRoute()
 const candidates = useCandidatesStore()
+const auth = useAuthStore()
 const jobs = useJobsStore()
 
 const batchInput = ref('')
@@ -43,6 +45,9 @@ const error = ref<ApiError | null>(null)
 const settlements = ref<SettlementRevision[]>([])
 const settlementsLoading = ref(false)
 const settlementsError = ref<ApiError | null>(null)
+const reconcileLoading = ref(false)
+const reconcileError = ref<ApiError | null>(null)
+const reconcileNotice = ref('')
 
 const lockConfirmed = ref(false)
 const locking = ref(false)
@@ -103,6 +108,26 @@ async function loadSettlements(id: number): Promise<void> {
     settlements.value = []
   } finally {
     settlementsLoading.value = false
+  }
+}
+
+/** 管理员触发结算重算：同一开奖修订幂等，开奖更正后追加修订。 */
+async function reconcileSettlement(): Promise<void> {
+  if (!selected.value) return
+  reconcileError.value = null
+  reconcileNotice.value = ''
+  reconcileLoading.value = true
+  try {
+    const payload = await apiPost<{ created: boolean }>(
+      '/admin/settlements/reconcile',
+      { batch_id: selected.value.id },
+    )
+    reconcileNotice.value = payload.created ? '已生成新结算修订' : '该开奖修订已有结算（幂等）'
+    await loadSettlements(selected.value.id)
+  } catch (caught) {
+    reconcileError.value = toApiError(caught)
+  } finally {
+    reconcileLoading.value = false
   }
 }
 
@@ -403,9 +428,30 @@ onMounted(() => {
         <EmptyState
           v-else
           title="暂无结算记录"
-          description="开奖后由后端核对服务生成；来源冲突时不结算。后端当前没有通过 HTTP 触发重新核对的端点。"
+          description="开奖后由后端核对服务生成；来源冲突时不结算。管理员可用下方按钮触发重算。"
           hint="开奖更正会追加新结算修订，旧结算仍可查。"
         />
+        <p v-if="reconcileNotice" class="ok-text">{{ reconcileNotice }}</p>
+        <ErrorNote :error="reconcileError" context="触发结算" />
+        <template #actions>
+          <button
+            v-if="auth.isAdmin && selected"
+            type="button"
+            class="action-button"
+            :disabled="reconcileLoading"
+            @click="reconcileSettlement"
+          >
+            {{ reconcileLoading ? '结算中…' : '按当前开奖重算结算' }}
+          </button>
+          <button
+            type="button"
+            class="ghost-button"
+            :disabled="settlementsLoading || !selected"
+            @click="selected && loadSettlements(selected.id)"
+          >
+            刷新结算
+          </button>
+        </template>
         <details v-if="currentSettlement" class="raw-details">
           <summary>查看当前结算命中明细（原始结果）</summary>
           <pre>{{ JSON.stringify(currentSettlement.result, null, 2) }}</pre>
