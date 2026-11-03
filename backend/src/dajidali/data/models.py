@@ -1036,3 +1036,196 @@ class AiRun(Base):
         ForeignKey("job.id", name="fk_ai_run_job", ondelete="SET NULL"),
         nullable=True,
     )
+
+
+# ---------------------------------------------------------------------------
+# 任务 05/06/08：统计运行、回测计划、回测运行与逐期结果
+# （设计文档 6.1、9.1—9.3、11.1—11.3）
+#
+# 统计结果按 owner 隔离，开奖数据本身组织共享；回测计划冻结参数与全部尝试，
+# 逐期结果保留候选哈希与命中，便于独立复算。这里只追加新表，不改动已有类。
+# ---------------------------------------------------------------------------
+
+EXPERIMENT_RUN_STATUSES: tuple[str, ...] = (
+    "running",
+    "succeeded",
+    "failed",
+    "cancelled",
+)
+"""回测运行状态；首版由 job 状态驱动，不单独提供取消动作。"""
+
+BACKTEST_PERIOD_STAGES: tuple[str, ...] = ("train", "validation", "holdout")
+"""逐期结果所属的时间分段，与 :class:`dajidali.engine.backtest.plan.SplitStage` 一致。"""
+
+HOLDOUT_STATES: tuple[str, ...] = ("sealed", "opened")
+"""封存测试集状态：只允许从 ``sealed`` 单向变为 ``opened``。"""
+
+
+class AnalysisRun(Base):
+    """一次统计事实集的持久化结果（设计文档 6.1、7.1）。
+
+    ``facts_json`` 保存规范化的 ``Fact`` 列表，``quality_json`` 保存质量摘要，
+    ``analysis_hash`` 覆盖事实与指标版本。同一归属下 ``request_id`` 与
+    ``(snapshot_id, analysis_hash)`` 各自唯一：重复执行同一任务不会产生重复行。
+    统计结果按 owner 隔离；快照与开奖数据本身是组织共享的。
+    """
+
+    __tablename__ = "analysis_run"
+    __table_args__ = (
+        UniqueConstraint("owner_id", "request_id", name="uq_analysis_run_owner_request"),
+        UniqueConstraint(
+            "owner_id",
+            "snapshot_id",
+            "analysis_hash",
+            name="uq_analysis_run_owner_snapshot_hash",
+        ),
+        Index("ix_analysis_run_snapshot", "snapshot_id"),
+        Index("ix_analysis_run_owner_created", "owner_id", "created_at"),
+        Index("ix_analysis_run_job", "job_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    owner_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("user.id", name="fk_analysis_run_owner", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    snapshot_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey(
+            "dataset_snapshot.id",
+            name="fk_analysis_run_snapshot",
+            ondelete="RESTRICT",
+        ),
+        nullable=False,
+    )
+    request_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    metric_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    windows_json: Mapped[str] = mapped_column(Text, nullable=False)
+    facts_json: Mapped[str] = mapped_column(Text, nullable=False)
+    quality_json: Mapped[str] = mapped_column(Text, nullable=False)
+    analysis_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, default=utc_now)
+    job_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("job.id", name="fk_analysis_run_job", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+
+class ExperimentPlan(Base):
+    """冻结的回测计划：时间划分、策略、种子、全部尝试与封存状态。
+
+    ``plan_hash`` 覆盖数据快照哈希、划分、K、冻结策略、主指标、种子与尝试
+    注册表；同一归属下相同哈希只保留一行，重复执行任务复用同一计划。
+    ``holdout_state`` 记录封存集是否已经被打开过（只能单向变化）。
+    """
+
+    __tablename__ = "experiment_plan"
+    __table_args__ = (
+        UniqueConstraint("owner_id", "plan_hash", name="uq_experiment_plan_owner_hash"),
+        CheckConstraint(
+            "holdout_state IN ({})".format(", ".join(repr(s) for s in HOLDOUT_STATES)),
+            name="ck_experiment_plan_holdout_state",
+        ),
+        Index("ix_experiment_plan_owner_created", "owner_id", "created_at"),
+        Index("ix_experiment_plan_hash", "plan_hash"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    owner_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("user.id", name="fk_experiment_plan_owner", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    plan_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    split_json: Mapped[str] = mapped_column(Text, nullable=False)
+    strategy_json: Mapped[str] = mapped_column(Text, nullable=False)
+    registry_json: Mapped[str] = mapped_column(Text, nullable=False)
+    primary_metric: Mapped[str] = mapped_column(String(32), nullable=False)
+    master_seed_hex: Mapped[str] = mapped_column(String(64), nullable=False)
+    holdout_state: Mapped[str] = mapped_column(String(16), nullable=False, default="sealed")
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, default=utc_now)
+
+
+class ExperimentRun(Base):
+    """一次回测执行：状态、进度、指标摘要与 bootstrap 区间。
+
+    ``job_id`` 参与唯一约束 ``(plan_id, job_id)``，同一任务重复执行只更新同一行；
+    ``job_id`` 为空时（直接服务调用）每次新建一行，便于单元测试与人工复算。
+    """
+
+    __tablename__ = "experiment_run"
+    __table_args__ = (
+        UniqueConstraint("plan_id", "job_id", name="uq_experiment_run_plan_job"),
+        CheckConstraint(
+            "status IN ({})".format(", ".join(repr(s) for s in EXPERIMENT_RUN_STATUSES)),
+            name="ck_experiment_run_status",
+        ),
+        Index("ix_experiment_run_plan", "plan_id"),
+        Index("ix_experiment_run_status", "status"),
+        Index("ix_experiment_run_job", "job_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    plan_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey(
+            "experiment_plan.id",
+            name="fk_experiment_run_plan",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+    )
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="running")
+    progress_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    metrics_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    bootstrap_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+    job_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("job.id", name="fk_experiment_run_job", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+
+class BacktestPeriodResult(Base):
+    """逐期回测结果：候选内容哈希、命中明细、基线与排除原因（设计文档 6.1、9.3）。
+
+    ``candidate_hash`` 覆盖期号、期序号、种子、前缀快照哈希、策略哈希与当期
+    候选号码，可由 :func:`dajidali.services.backtests.period_candidate_hash`
+    独立复算；``hits_json`` 保存逐组命中，``baseline_json`` 保存 B0/B1 的逐期
+    轨迹均值。因热身不足被排除的期次只写 ``excluded_reason``。
+    """
+
+    __tablename__ = "backtest_period_result"
+    __table_args__ = (
+        UniqueConstraint(
+            "run_id", "issue", "stage", name="uq_backtest_period_run_issue_stage"
+        ),
+        CheckConstraint(
+            "stage IN ({})".format(", ".join(repr(s) for s in BACKTEST_PERIOD_STAGES)),
+            name="ck_backtest_period_stage",
+        ),
+        Index("ix_backtest_period_run_stage", "run_id", "stage"),
+        Index("ix_backtest_period_issue", "issue"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey(
+            "experiment_run.id",
+            name="fk_backtest_period_run",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+    )
+    issue: Mapped[str] = mapped_column(String(32), nullable=False)
+    stage: Mapped[str] = mapped_column(String(16), nullable=False)
+    candidate_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    hits_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    baseline_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    excluded_reason: Mapped[str | None] = mapped_column(String(64), nullable=True)
