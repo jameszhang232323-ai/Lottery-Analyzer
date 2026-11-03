@@ -233,18 +233,42 @@ def test_claim_follows_creation_order() -> None:
 
 
 def test_worker_heartbeat_keeps_long_job_lease_alive() -> None:
-    """长任务执行期间后台心跳续租，超过初始租约后仍可提交成功。"""
+    """长任务执行期间后台心跳续租：观察到租约被延长，且任务最终成功提交。
+
+    这里不用固定 sleep 抢时序，而是让处理器**等到数据库里的租约确实被延长**再返回：
+    心跳坏了（不再续租）时处理器会等满 5 秒真实时间（业务时间约 50 秒，早已超过 2 秒
+    租约），随后的 complete 必然被租约校验拒绝，测试仍然会失败；心跳正常时则不依赖
+    调度时序，不会因机器负载偶发失败。
+    """
     with temporary_database() as (_engine, factory, _path):
         started = time.monotonic()
 
         def now_provider() -> datetime:
-            # 1 秒真实时间约等于 10 秒业务时间，快速跨过初始 2 秒租约。
+            # 1 秒真实时间约等于 10 秒业务时间，便于快速跨过初始 2 秒租约。
             return T0 + timedelta(seconds=(time.monotonic() - started) * 10)
+
+        renewals: list[datetime] = []
 
         def slow_handler(payload: dict[str, object]) -> dict[str, object]:
             assert payload == {"n": 1}
-            time.sleep(0.35)
+            deadline = time.monotonic() + 5.0
+            while time.monotonic() < deadline:
+                with factory() as session:
+                    current = JobRepository(session).get(job_id)
+                lease = current.lease_expires_at if current is not None else None
+                if lease is not None:
+                    if renewals and lease > renewals[-1]:
+                        renewals.append(lease)
+                        if len(renewals) >= 2:
+                            break
+                    elif not renewals:
+                        renewals.append(lease)
+                time.sleep(0.005)
             return {"slow": True}
+
+        with factory() as session:
+            job = JobRepository(session).enqueue("slow", {"n": 1}, "slow-job")
+            job_id = job.id
 
         worker = JobWorker(
             factory,
@@ -253,11 +277,9 @@ def test_worker_heartbeat_keeps_long_job_lease_alive() -> None:
             heartbeat_interval=0.02,
             now_provider=now_provider,
         )
-        with factory() as session:
-            job = JobRepository(session).enqueue("slow", {"n": 1}, "slow-job")
-            job_id = job.id
-
         assert worker.run_once() == job_id
+
+        assert len(renewals) >= 2, "心跳没有延长租约"
 
         with factory() as session:
             repository = JobRepository(session)
