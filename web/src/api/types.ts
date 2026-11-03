@@ -627,3 +627,20 @@ export interface ProviderStatus {
 export interface ProvidersResponse {
   items: ProviderStatus[]
 }
+
+/** 备份归档列表项；损坏归档 usable=false，reason 给出原因。 */
+export interface BackupListItem {
+  backup_id: string
+  usable: boolean
+  size_bytes: number
+  sha256: string | null
+  created_at: string | null
+  backup_schema: string | null
+  table_row_counts: Record<string, number>
+  reason: string | null
+}
+
+export interface BackupsResponse {
+  items: BackupListItem[]
+  count: number
+}

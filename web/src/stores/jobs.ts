@@ -67,7 +67,9 @@ export const useJobsStore = defineStore('jobs', () => {
   const jobs = ref<TrackedJob[]>([])
   const restoreError = ref<ApiError | null>(null)
   const cancelError = ref<ApiError | null>(null)
+  const stateError = ref<ApiError | null>(null)
   const cancellingIds = ref<number[]>([])
+  const stateBusyIds = ref<number[]>([])
   const polling = ref(false)
 
   let timer: ReturnType<typeof setInterval> | null = null
@@ -268,6 +270,29 @@ export const useJobsStore = defineStore('jobs', () => {
     }
   }
 
+  function isStateBusy(id: number): boolean {
+    return stateBusyIds.value.includes(id)
+  }
+
+  /** 暂停/恢复：只有排队中的任务可暂停，已暂停的任务可恢复。 */
+  async function changeState(id: number, action: 'pause' | 'resume'): Promise<boolean> {
+    stateError.value = null
+    const tracked = find(id)
+    if (!tracked || isStateBusy(id)) return false
+    stateBusyIds.value = [...stateBusyIds.value, id]
+    try {
+      const payload = await apiPost<{ job: JobSummary }>(`/jobs/${id}/${action}`, {})
+      applyJob(tracked, payload.job)
+      return true
+    } catch (caught) {
+      stateError.value = toApiError(caught)
+      return false
+    } finally {
+      stateBusyIds.value = stateBusyIds.value.filter((value) => value !== id)
+      ensureTimer()
+    }
+  }
+
   /** 组件卸载不应停止后台轮询；只有显式 clear 才停止。 */
   function progressOf(job: TrackedJob): { text: string; percent: number | null } {
     return describeJobProgress(job.progress, job.checkpoint)
@@ -280,6 +305,7 @@ export const useJobsStore = defineStore('jobs', () => {
     polling,
     restoreError,
     cancelError,
+    stateError,
     find,
     track,
     refresh,
@@ -287,6 +313,8 @@ export const useJobsStore = defineStore('jobs', () => {
     restore,
     cancel,
     isCancelling,
+    changeState,
+    isStateBusy,
     clearFinished,
     clearAll,
     remove,

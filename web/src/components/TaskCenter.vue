@@ -94,6 +94,10 @@ onMounted(() => {
         取消失败：{{ jobs.cancelError.kindLabel }} · {{ jobs.cancelError.code }} ·
         {{ jobs.cancelError.message }}
       </p>
+      <p v-if="jobs.stateError" class="error-inline" role="alert">
+        状态操作失败：{{ jobs.stateError.kindLabel }} · {{ jobs.stateError.code }} ·
+        {{ jobs.stateError.message }}
+      </p>
 
       <p v-if="jobs.jobs.length === 0" class="muted task-empty">
         当前会话还没有任务。创建同步、统计、候选、回测或 AI 任务后会出现在这里。
@@ -110,6 +114,24 @@ onMounted(() => {
               :tone="describeJobStatus(job.status).tone"
               :label="describeJobStatus(job.status).label"
             />
+            <button
+              v-if="job.status === 'queued'"
+              type="button"
+              class="ghost-button"
+              :disabled="jobs.isStateBusy(job.id)"
+              @click="jobs.changeState(job.id, 'pause')"
+            >
+              {{ jobs.isStateBusy(job.id) ? '处理中…' : '暂停' }}
+            </button>
+            <button
+              v-if="job.status === 'paused'"
+              type="button"
+              class="ghost-button"
+              :disabled="jobs.isStateBusy(job.id)"
+              @click="jobs.changeState(job.id, 'resume')"
+            >
+              {{ jobs.isStateBusy(job.id) ? '处理中…' : '恢复' }}
+            </button>
             <button
               v-if="!['succeeded', 'failed', 'cancelled', 'interrupted'].includes(job.status)"
               type="button"

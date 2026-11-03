@@ -13,7 +13,9 @@ import type {
   AdminUserResponse,
   AdminUsersResponse,
   Backup,
+  BackupListItem,
   BackupResponse,
+  BackupsResponse,
   ExportResponse,
   RestorePreview,
   RestorePreviewResponse,
@@ -73,6 +75,10 @@ const backup = ref<Backup | null>(null)
 const backupLoading = ref(false)
 const backupError = ref<ApiError | null>(null)
 const previewBackupId = ref('')
+
+const backupsList = ref<BackupListItem[]>([])
+const backupsListLoading = ref(false)
+const backupsListError = ref<ApiError | null>(null)
 const preview = ref<RestorePreview | null>(null)
 const previewLoading = ref(false)
 const previewError = ref<ApiError | null>(null)
@@ -219,10 +225,24 @@ async function createBackup(): Promise<void> {
     const payload = await apiPost<BackupResponse>('/admin/backups')
     backup.value = payload.backup
     previewBackupId.value = payload.backup.backup_id
+    await loadBackups()
   } catch (caught) {
     backupError.value = toApiError(caught)
   } finally {
     backupLoading.value = false
+  }
+}
+
+async function loadBackups(): Promise<void> {
+  backupsListLoading.value = true
+  backupsListError.value = null
+  try {
+    const payload = await apiGet<BackupsResponse>('/admin/backups')
+    backupsList.value = payload.items
+  } catch (caught) {
+    backupsListError.value = toApiError(caught)
+  } finally {
+    backupsListLoading.value = false
   }
 }
 
@@ -290,6 +310,7 @@ onMounted(() => {
     void loadUsers()
     void loadSecrets()
     void loadProviders()
+    void loadBackups()
   }
   void system.refresh()
 })
@@ -491,8 +512,38 @@ onMounted(() => {
           <DataStatus label="创建时间" :value="formatSyncTime(backup?.created_at)" :unwired="backup === null" />
         </div>
         <p class="muted">
-          后端没有备份列表接口，这里只显示本次会话创建的结果；恢复确认接口未在本页提供，避免误切换数据库。
+          恢复确认接口未在本页提供，避免误切换数据库；备份列表只读，损坏归档会标注原因。
         </p>
+        <p v-if="backupsListLoading" class="loading-note">正在读取备份列表…</p>
+        <ErrorNote :error="backupsListError" context="读取备份列表" />
+        <div v-if="backupsList.length" class="table-shell">
+          <table>
+            <thead>
+              <tr>
+                <th>归档</th>
+                <th>状态</th>
+                <th>大小</th>
+                <th>创建时间</th>
+                <th>schema</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="item in backupsList" :key="item.backup_id">
+                <td>{{ item.backup_id }}</td>
+                <td>
+                  <StatusPill
+                    :label="item.usable ? '可用' : '损坏'"
+                    :tone="item.usable ? 'ok' : 'error'"
+                  />
+                </td>
+                <td>{{ item.size_bytes }} B</td>
+                <td>{{ formatSyncTime(item.created_at) }}</td>
+                <td>{{ item.backup_schema ?? item.reason ?? '—' }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p v-else-if="!backupsListLoading" class="muted">暂无备份归档。</p>
         <ErrorNote :error="backupError" context="创建备份" />
         <div class="filter-grid">
           <label class="field">
@@ -521,6 +572,14 @@ onMounted(() => {
             </button>
             <button type="button" class="action-button" :disabled="previewLoading" @click="previewRestore">
               {{ previewLoading ? '预览中…' : '恢复预览' }}
+            </button>
+            <button
+              type="button"
+              class="ghost-button"
+              :disabled="backupsListLoading"
+              @click="loadBackups"
+            >
+              {{ backupsListLoading ? '刷新中…' : '刷新备份列表' }}
             </button>
           </div>
         </template>
