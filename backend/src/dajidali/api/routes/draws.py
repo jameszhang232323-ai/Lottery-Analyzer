@@ -13,11 +13,13 @@
 from __future__ import annotations
 
 import base64
+import csv
+import io
 import json
-from datetime import date
+from datetime import UTC, date, datetime
 from typing import Any
 
-from fastapi import APIRouter, FastAPI
+from fastapi import APIRouter, FastAPI, Response
 from sqlalchemy import and_, select
 from sqlalchemy.orm import Session
 
@@ -37,10 +39,12 @@ from dajidali.domain.draw import Fc3dNumbers, SsqNumbers
 from dajidali.domain.errors import DomainError
 from dajidali.security.authorization import NOT_FOUND_MESSAGE, NotFoundError
 from dajidali.services.coverage import compute_coverage
+from dajidali.services.exports import sanitize_csv_cell
 
 API_PREFIX = "/api/v1"
 MAX_PAGE_LIMIT = 200
 DEFAULT_PAGE_LIMIT = 50
+MAX_EXPORT_ROWS = 5000
 CALENDAR_MIN_YEAR = 2000
 CALENDAR_MAX_YEAR = 2100
 
@@ -262,6 +266,94 @@ def latest_draw(
         raise NotFoundError(NOT_FOUND_MESSAGE)
     row, status = rows[-1]
     return {"draw": draw_payload(row, is_current=True, current_status=status)}
+
+
+@router.get("/draws/export")
+def export_draws(
+    game: str = "ssq",
+    start_issue: str | None = None,
+    end_issue: str | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    format: str = "csv",
+    user: User = AuthenticatedUser,
+    db: Session = DbSession,
+) -> Response:
+    """按当前筛选导出开奖数据（CSV 或 JSON）。
+
+    导出使用同一套筛选语义；CSV 单元格做公式注入防护，内容为真实当前修订，
+    不包含来源凭据或原始载荷。
+    """
+    del user
+    if format not in {"csv", "json"}:
+        raise DrawApiError(
+            "format 只能是 csv 或 json",
+            code="INVALID_FORMAT",
+            format=format,
+        )
+    require_game(db, game)
+    _validate_range(start_issue, end_issue)
+    date_from, date_to = _validate_dates(start_date, end_date)
+    rows = _current_rows(db, game, start_issue, end_issue, date_from, date_to)
+    if len(rows) > MAX_EXPORT_ROWS:
+        raise DrawApiError(
+            f"导出范围超过 {MAX_EXPORT_ROWS} 期，请缩小区间",
+            code="EXPORT_TOO_LARGE",
+            limit=MAX_EXPORT_ROWS,
+            rows=len(rows),
+        )
+    items = [draw_payload(row, is_current=True, current_status=status) for row, status in rows]
+
+    if format == "csv":
+        buffer = io.StringIO()
+        writer = csv.writer(buffer, lineterminator="\n")
+        writer.writerow(
+            ["期号", "开奖日期", "红球", "蓝球", "修订号", "质量", "来源模式", "当前状态"]
+        )
+        for item in items:
+            numbers = item["numbers"]
+            reds = numbers.get("reds") or []
+            writer.writerow(
+                [
+                    sanitize_csv_cell(str(item["issue"])),
+                    item["draw_date"],
+                    " ".join(f"{value:02d}" for value in reds),
+                    f"{numbers.get('blue'):02d}" if numbers.get("blue") is not None else "",
+                    item["revision"],
+                    sanitize_csv_cell(str(item["quality_status"])),
+                    sanitize_csv_cell(str(item["source_mode"] or "")),
+                    sanitize_csv_cell(str(item["current_status"])),
+                ]
+            )
+        content = ("\ufeff" + buffer.getvalue()).encode("utf-8")
+        return Response(
+            content=content,
+            media_type="text/csv; charset=utf-8",
+            headers={
+                "Content-Disposition": f'attachment; filename="draws-{game}.csv"',
+            },
+        )
+
+    payload = {
+        "schema": "draws-export-v1",
+        "generated_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+        "game": game,
+        "range": {
+            "start_issue": start_issue,
+            "end_issue": end_issue,
+            "start_date": start_date,
+            "end_date": end_date,
+        },
+        "disclaimer": "研究用途，不构成购彩建议；号码以官方公告为准。",
+        "rows": items,
+    }
+    return Response(
+        content=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        media_type="application/json",
+        headers={
+            "Content-Disposition": f'attachment; filename="draws-{game}.json"',
+        },
+    )
 
 
 @router.get("/draws/{game}/{issue}")
