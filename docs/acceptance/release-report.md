@@ -10,7 +10,7 @@
 | 项 | 结果 | 命令 |
 |---|---|---|
 | 后端静态检查 | 通过 | `backend/.venv/Scripts/python.exe -m ruff check src tests` |
-| 后端测试 | **619 passed, 2 skipped** | `.venv\Scripts\python.exe -m pytest` |
+| 后端测试 | **624 passed, 2 skipped** | `.venv\Scripts\python.exe -m pytest` |
 | 前端类型检查 | 通过 | `node <node> <pnpm> typecheck` |
 | 前端构建 | 通过（主包 252 kB / gzip 83 kB，ECharts 分块） | `... build` |
 | 前端单元测试 | **85 passed** | `... test:unit` |
