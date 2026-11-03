@@ -338,22 +338,43 @@ def cmd_serve_api(
 def _register_builtin_handlers(
     factory: sessionmaker[Session],
     environ: Mapping[str, str] | None,
-) -> bool:
-    """把已配置的内置业务处理器注册到当前 worker 进程。
+) -> list[str]:
+    """把内置业务处理器注册到当前 worker 进程，返回已注册的 kind 列表。
 
-    目前只有 ``ai.analyze``：凭证齐全时才注册；未配置时保持未注册，
-    相关任务会以 ``AI_NOT_CONFIGURED`` 明确失败，而不是静默成功。
+    - ``analysis.run`` / ``candidate.generate`` / ``backtest.run``：总是注册；
+    - ``ai.analyze``：AI 凭证齐全时注册，否则相关任务明确失败为 ``AI_NOT_CONFIGURED``；
+    - ``sync.run``：来源已配置时注册（当前仅 ``DAJIDALI_SOURCE=recorded``）。
     """
+    registered: list[str] = []
+
+    from dajidali.services.analysis import register_handlers as register_analysis
+    from dajidali.services.backtests import register_handlers as register_backtests
+    from dajidali.services.candidate_jobs import register_handlers as register_candidates
+
+    register_analysis(factory)
+    register_candidates(factory)
+    register_backtests(factory)
+    registered.extend(["analysis.run", "candidate.generate", "backtest.run"])
+
     from dajidali.services.ai.runtime import provider_from_env
 
     provider = provider_from_env(environ)
-    if provider is None:
-        return False
+    if provider is not None:
+        from dajidali.api.routes.ai_jobs import register_ai_handler
 
-    from dajidali.api.routes.ai_jobs import register_ai_handler
+        register_ai_handler(factory, provider)
+        registered.append("ai.analyze")
 
-    register_ai_handler(factory, provider)
-    return True
+    from dajidali.services.sync import register_handlers as register_sync
+    from dajidali.services.sync import source_from_env
+
+    source = source_from_env(environ)
+    if source is not None:
+        register_sync(factory, source)
+        name = getattr(source, "name", source.__class__.__name__)
+        registered.append(f"sync.run（来源={name}）")
+
+    return registered
 
 
 def cmd_serve_worker(
@@ -371,8 +392,9 @@ def cmd_serve_worker(
     if worker is None:
         engine = create_engine_from_url(context.database_url)
         factory = create_session_factory(engine)
-        if _register_builtin_handlers(factory, environ):
-            print("已注册内置处理器：ai.analyze（provider 来自环境变量）。")
+        registered_kinds = _register_builtin_handlers(factory, environ)
+        if registered_kinds:
+            print("已注册内置处理器：" + "、".join(registered_kinds))
         handlers = dict(job_handlers or {})
         if not handlers and not registered_handlers():
             print("注意：当前进程尚未注册业务任务处理器；未知任务类型会被标记失败。")
