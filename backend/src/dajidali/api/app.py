@@ -20,6 +20,7 @@ from dajidali.api.deps import install_session_factory
 from dajidali.api.errors import ErrorBody, error_response
 from dajidali.api.routes import admin_router, auth_router, resource_router
 from dajidali.api.routes.candidates import router as candidates_router
+from dajidali.api.static import mount_static_from_env
 from dajidali.domain.errors import DomainError
 from dajidali.security.csrf import verify_csrf
 
@@ -114,6 +115,10 @@ def create_app(engine: Engine | None = None) -> FastAPI:
     app.include_router(admin_router, prefix=API_PREFIX)
     app.include_router(resource_router, prefix=API_PREFIX)
     app.include_router(candidates_router, prefix=API_PREFIX)
+
+    # 本机单进程模式：设置了 DAJIDALI_STATIC_DIR 且存在 web/dist 时，
+    # 由 API 直接提供八页界面（服务器模式交给 nginx）。必须放在所有 API 路由之后。
+    mount_static_from_env(app)
 
     return app
 
