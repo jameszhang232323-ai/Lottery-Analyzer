@@ -90,6 +90,10 @@ onMounted(() => {
         恢复失败：{{ jobs.restoreError.kindLabel }} · {{ jobs.restoreError.code }} ·
         {{ jobs.restoreError.message }}
       </p>
+      <p v-if="jobs.cancelError" class="error-inline" role="alert">
+        取消失败：{{ jobs.cancelError.kindLabel }} · {{ jobs.cancelError.code }} ·
+        {{ jobs.cancelError.message }}
+      </p>
 
       <p v-if="jobs.jobs.length === 0" class="muted task-empty">
         当前会话还没有任务。创建同步、统计、候选、回测或 AI 任务后会出现在这里。
@@ -106,6 +110,15 @@ onMounted(() => {
               :tone="describeJobStatus(job.status).tone"
               :label="describeJobStatus(job.status).label"
             />
+            <button
+              v-if="!['succeeded', 'failed', 'cancelled', 'interrupted'].includes(job.status)"
+              type="button"
+              class="ghost-button task-cancel"
+              :disabled="jobs.isCancelling(job.id)"
+              @click="jobs.cancel(job.id)"
+            >
+              {{ jobs.isCancelling(job.id) ? '取消中…' : '取消' }}
+            </button>
             <button
               v-if="['succeeded', 'failed', 'cancelled', 'interrupted'].includes(job.status)"
               type="button"

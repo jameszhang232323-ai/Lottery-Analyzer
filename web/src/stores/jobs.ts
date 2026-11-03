@@ -11,7 +11,7 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 
-import { apiGet, clientError, toApiError, type ApiError } from '../api/client'
+import { apiGet, apiPost, clientError, toApiError, type ApiError } from '../api/client'
 import type { JobDetailResponse, JobSummary } from '../api/types'
 import { isTerminalJobStatus, jobKindLabel, describeJobProgress } from './selectors'
 
@@ -66,6 +66,8 @@ async function fetchJobDetail(id: number, kind: string): Promise<JobSummary> {
 export const useJobsStore = defineStore('jobs', () => {
   const jobs = ref<TrackedJob[]>([])
   const restoreError = ref<ApiError | null>(null)
+  const cancelError = ref<ApiError | null>(null)
+  const cancellingIds = ref<number[]>([])
   const polling = ref(false)
 
   let timer: ReturnType<typeof setInterval> | null = null
@@ -229,6 +231,43 @@ export const useJobsStore = defineStore('jobs', () => {
     ensureTimer()
   }
 
+  function isCancelling(id: number): boolean {
+    return cancellingIds.value.includes(id)
+  }
+
+  /**
+   * 请求取消任务：排队中立即取消；运行中后端只记录取消请求，
+   * 由 worker 在安全点确认，界面继续轮询直到终态。
+   */
+  async function cancel(id: number): Promise<boolean> {
+    cancelError.value = null
+    const tracked = find(id)
+    if (!tracked) return false
+    if (isTerminalJobStatus(tracked.status)) {
+      cancelError.value = clientError('任务已结束，无法取消')
+      return false
+    }
+    if (isCancelling(id)) return false
+    cancellingIds.value = [...cancellingIds.value, id]
+    try {
+      const payload = await apiPost<{ job: JobSummary; cancel_requested: boolean }>(
+        `/jobs/${id}/cancel`,
+        {},
+      )
+      applyJob(tracked, payload.job)
+      if (payload.cancel_requested) {
+        tracked.errorMessage = tracked.errorMessage ?? '已请求取消，等待 worker 确认'
+      }
+      return true
+    } catch (caught) {
+      cancelError.value = toApiError(caught)
+      return false
+    } finally {
+      cancellingIds.value = cancellingIds.value.filter((value) => value !== id)
+      ensureTimer()
+    }
+  }
+
   /** 组件卸载不应停止后台轮询；只有显式 clear 才停止。 */
   function progressOf(job: TrackedJob): { text: string; percent: number | null } {
     return describeJobProgress(job.progress, job.checkpoint)
@@ -240,11 +279,14 @@ export const useJobsStore = defineStore('jobs', () => {
     runningCount,
     polling,
     restoreError,
+    cancelError,
     find,
     track,
     refresh,
     refreshAll,
     restore,
+    cancel,
+    isCancelling,
     clearFinished,
     clearAll,
     remove,
