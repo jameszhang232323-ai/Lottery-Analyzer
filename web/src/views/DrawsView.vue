@@ -43,6 +43,8 @@ const LIMIT_OPTIONS = [20, 50, 100, 200]
 
 const startIssue = ref('')
 const endIssue = ref('')
+const startDate = ref('')
+const endDate = ref('')
 const limit = ref(50)
 const items = ref<Draw[]>([])
 const nextCursor = ref<string | null>(null)
@@ -126,6 +128,8 @@ async function fetchPage(cursor: string | null, resetStack = false): Promise<voi
       game: GAME,
       start_issue: startIssue.value.trim() || null,
       end_issue: endIssue.value.trim() || null,
+      start_date: startDate.value || null,
+      end_date: endDate.value || null,
       limit: limit.value,
       cursor,
     })
@@ -319,6 +323,14 @@ onMounted(() => {
           <input v-model="endIssue" class="field-input" type="text" inputmode="numeric" placeholder="例如 2025150" />
         </label>
         <label class="field">
+          <span class="field-label">开始日期</span>
+          <input v-model="startDate" class="field-input" type="date" />
+        </label>
+        <label class="field">
+          <span class="field-label">结束日期</span>
+          <input v-model="endDate" class="field-input" type="date" />
+        </label>
+        <label class="field">
           <span class="field-label">每页条数</span>
           <select v-model.number="limit" class="field-input">
             <option v-for="value in LIMIT_OPTIONS" :key="value" :value="value">{{ value }}</option>
@@ -327,7 +339,7 @@ onMounted(() => {
       </div>
       <p class="muted">
         当前第 {{ cursorStack.length }} 页，共 {{ items.length }} 条；后端游标只记录上一页最后一期。
-        后端 /draws 只支持期号区间与游标，不支持按日期筛选；下表仍展示真实开奖日期。
+        期号区间与日期区间可同时使用（取交集）。
       </p>
       <template #actions>
         <div class="action-row">
@@ -347,7 +359,7 @@ onMounted(() => {
             type="button"
             class="ghost-button"
             :disabled="pageLoading"
-            @click="startIssue = ''; endIssue = ''; search()"
+            @click="startIssue = ''; endIssue = ''; startDate = ''; endDate = ''; search()"
           >
             重置
           </button>
