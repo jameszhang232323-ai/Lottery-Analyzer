@@ -108,7 +108,7 @@ class JobWorker:
         with self._session_factory() as session:
             repository = JobRepository(session, lease_seconds=self._lease_seconds)
             repository.recover_expired(timestamp)
-            job = repository.claim_next(timestamp)
+            job = repository.claim_next(timestamp, blocked_kinds=repository.blocked_kinds())
             if job is None:
                 return None
             return self._run_claimed(repository, job)

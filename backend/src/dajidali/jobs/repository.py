@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 import secrets
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -32,6 +32,7 @@ from dajidali.data.models import (
 )
 from dajidali.domain.canonical import CanonicalError, canonical_json, sha256_hex
 from dajidali.domain.errors import DomainError
+from dajidali.jobs.limits import KIND_CONCURRENCY_LIMITS
 
 DEFAULT_LEASE_SECONDS = 30
 CLAIM_RETRIES = 5
@@ -149,15 +150,34 @@ class JobRepository:
             ) from exc
         return job
 
-    def claim_next(self, now: datetime | None = None) -> Job | None:
-        """用条件更新领取最早的 queued 任务；没有可领取任务时返回 ``None``。"""
+    def blocked_kinds(self) -> set[str]:
+        """已经达到并发上限的任务类型（运行中数量不小于上限）。"""
+        rows = self._session.execute(
+            select(Job.kind, func.count(Job.id))
+            .where(Job.status == JOB_STATUS_RUNNING)
+            .group_by(Job.kind)
+        ).all()
+        counts = {kind: int(count) for kind, count in rows}
+        return {
+            kind
+            for kind, limit in KIND_CONCURRENCY_LIMITS.items()
+            if counts.get(kind, 0) >= limit
+        }
+
+    def claim_next(
+        self,
+        now: datetime | None = None,
+        *,
+        blocked_kinds: Collection[str] | None = None,
+    ) -> Job | None:
+        """用条件更新领取最早的 queued 任务；可跳过已达并发上限的类型。"""
         timestamp = as_utc(now or utc_now())
         for _attempt in range(CLAIM_RETRIES):
+            statement = select(Job.id).where(Job.status == JOB_STATUS_QUEUED)
+            if blocked_kinds:
+                statement = statement.where(Job.kind.not_in(tuple(blocked_kinds)))
             job_id = self._session.scalar(
-                select(Job.id)
-                .where(Job.status == JOB_STATUS_QUEUED)
-                .order_by(Job.created_at, Job.id)
-                .limit(1)
+                statement.order_by(Job.created_at, Job.id).limit(1)
             )
             if job_id is None:
                 return None
