@@ -16,6 +16,8 @@ import type {
   Draw,
   DrawDetailResponse,
   DrawsResponse,
+  ObservationItem,
+  ObservationsResponse,
 } from '../api/types'
 import DataStatus from '../components/DataStatus.vue'
 import EmptyState from '../components/EmptyState.vue'
@@ -45,6 +47,7 @@ const startIssue = ref('')
 const endIssue = ref('')
 const startDate = ref('')
 const endDate = ref('')
+const order = ref<'asc' | 'desc'>('asc')
 const limit = ref(50)
 const items = ref<Draw[]>([])
 const nextCursor = ref<string | null>(null)
@@ -56,6 +59,10 @@ const selected = ref<Draw | null>(null)
 const revisions = ref<Draw[]>([])
 const detailLoading = ref(false)
 const detailError = ref<ApiError | null>(null)
+
+const observations = ref<ObservationItem[]>([])
+const observationsLoading = ref(false)
+const observationsError = ref<ApiError | null>(null)
 
 const calendar = ref<CalendarResponse | null>(null)
 const calendarYear = ref(new Date().getFullYear())
@@ -130,6 +137,7 @@ async function fetchPage(cursor: string | null, resetStack = false): Promise<voi
       end_issue: endIssue.value.trim() || null,
       start_date: startDate.value || null,
       end_date: endDate.value || null,
+      order: order.value,
       limit: limit.value,
       cursor,
     })
@@ -182,16 +190,38 @@ async function latestPage(): Promise<void> {
 async function openDetail(draw: Draw): Promise<void> {
   selected.value = draw
   revisions.value = []
+  observations.value = []
+  observationsError.value = null
   detailLoading.value = true
   detailError.value = null
   try {
     const payload = await apiGet<DrawDetailResponse>(`/draws/${gameOf(draw)}/${draw.issue}`)
     selected.value = payload.draw
     revisions.value = payload.revisions
+    await loadObservations(payload.draw)
   } catch (caught) {
     detailError.value = toApiError(caught)
   } finally {
     detailLoading.value = false
+  }
+}
+
+async function loadObservations(draw: Draw | null = selected.value): Promise<void> {
+  if (!draw) return
+  observationsLoading.value = true
+  observationsError.value = null
+  try {
+    const payload = await apiGet<ObservationsResponse>(
+      `/draws/${gameOf(draw)}/${draw.issue}/observations`,
+    )
+    observations.value = payload.items
+  } catch (caught) {
+    const error = toApiError(caught)
+    // 没有来源观察是正常情况（导入或人工修正），不当作页面错误。
+    observations.value = []
+    observationsError.value = error.status === 404 ? null : error
+  } finally {
+    observationsLoading.value = false
   }
 }
 
@@ -329,6 +359,13 @@ onMounted(() => {
         <label class="field">
           <span class="field-label">结束日期</span>
           <input v-model="endDate" class="field-input" type="date" />
+        </label>
+        <label class="field">
+          <span class="field-label">排序</span>
+          <select v-model="order" class="field-input">
+            <option value="asc">升序（最早在前）</option>
+            <option value="desc">倒序（最新在前）</option>
+          </select>
         </label>
         <label class="field">
           <span class="field-label">每页条数</span>
@@ -473,8 +510,32 @@ onMounted(() => {
           </li>
         </ul>
         <p class="muted">
-          后端未提供跨来源观察明细接口；本页只显示当前修订与修订链中的来源模式、质量与观察时间，
-          不编造来源原文。
+          来源观察只返回元数据（来源、抓取时间、载荷哈希），不回传原始载荷；同一期可能有多次观察。
+        </p>
+        <p v-if="observationsLoading" class="loading-note">正在读取来源观察…</p>
+        <ErrorNote :error="observationsError" context="读取来源观察" />
+        <div v-if="observations.length" class="table-shell">
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">来源</th>
+                <th scope="col">抓取时间</th>
+                <th scope="col">载荷哈希</th>
+                <th scope="col">原始载荷</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="item in observations" :key="item.id">
+                <td>{{ item.source }}</td>
+                <td>{{ formatSyncTime(item.retrieved_at) }}</td>
+                <td><code>{{ item.payload_hash.slice(0, 16) }}…</code></td>
+                <td>{{ item.has_payload ? '已保存（不展示）' : '未保存' }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p v-else-if="!observationsLoading" class="muted">
+          该期没有来源观察记录（可能是导入或人工修正）。
         </p>
       </template>
       <EmptyState

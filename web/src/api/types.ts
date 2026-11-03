@@ -174,6 +174,24 @@ export interface DrawDetailResponse {
   current_status: string
 }
 
+/** 来源原始观察的元数据；不回传原始载荷。 */
+export interface ObservationItem {
+  id: number
+  source: string
+  source_url: string | null
+  retrieved_at: string | null
+  payload_hash: string
+  has_payload: boolean
+  raw_ref: string | null
+}
+
+export interface ObservationsResponse {
+  game: string
+  issue: string
+  items: ObservationItem[]
+  count: number
+}
+
 export interface CalendarItem {
   game: string
   issue: string
