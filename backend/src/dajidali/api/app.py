@@ -19,6 +19,7 @@ from dajidali import __version__
 from dajidali.api.deps import install_session_factory
 from dajidali.api.errors import ErrorBody, error_response
 from dajidali.api.routes import admin_router, auth_router, resource_router
+from dajidali.api.routes.candidates import router as candidates_router
 from dajidali.domain.errors import DomainError
 from dajidali.security.csrf import verify_csrf
 
@@ -112,6 +113,7 @@ def create_app(engine: Engine | None = None) -> FastAPI:
     app.include_router(auth_router, prefix=API_PREFIX)
     app.include_router(admin_router, prefix=API_PREFIX)
     app.include_router(resource_router, prefix=API_PREFIX)
+    app.include_router(candidates_router, prefix=API_PREFIX)
 
     return app
 

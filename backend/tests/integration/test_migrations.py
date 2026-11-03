@@ -13,6 +13,7 @@ from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
+from alembic.script import ScriptDirectory
 from sqlalchemy import inspect, text
 
 from dajidali.data.database import create_engine_from_url, make_sqlite_url
@@ -59,6 +60,13 @@ def make_alembic_config(db_path: Path) -> Config:
     return config
 
 
+def expected_head(config: Config) -> str:
+    """迁移目录当前 head；后续新增迁移不需要改这里的断言。"""
+    head = ScriptDirectory.from_config(config).get_current_head()
+    assert head is not None
+    return head
+
+
 def table_names(db_path: Path) -> set[str]:
     engine = create_engine_from_url(make_sqlite_url(db_path))
     try:
@@ -84,7 +92,7 @@ def test_upgrade_head_creates_all_tables(monkeypatch) -> None:
                 version = connection.execute(
                     text("select version_num from alembic_version")
                 ).scalar_one()
-                assert version == "0002"
+                assert version == expected_head(config)
                 games = connection.execute(
                     text("select code, enabled from lottery_game order by code")
                 ).all()

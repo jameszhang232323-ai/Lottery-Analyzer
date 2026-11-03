@@ -32,6 +32,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     event,
+    inspect,
     select,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship
@@ -675,3 +676,306 @@ def _reject_immutable_delete(mapper: Any, connection: Any, target: Any) -> None:
 for _immutable_model in (SourceObservation, DrawRevision, DatasetSnapshot, SnapshotMember):
     event.listen(_immutable_model, "before_update", _reject_immutable_update)
     event.listen(_immutable_model, "before_delete", _reject_immutable_delete)
+
+
+# ---------------------------------------------------------------------------
+# 任务 07：规则版本、策略版本、候选批次、候选行、结算修订与审计事件
+# （设计文档 6.1、9.4、10.1—10.3）
+# ---------------------------------------------------------------------------
+
+CANDIDATE_BATCH_STATUSES: tuple[str, ...] = (
+    "draft",
+    "locked",
+    "awaiting_result",
+    "settled",
+    "archived",
+)
+
+CANDIDATE_BATCH_STATUS_DRAFT = "draft"
+CANDIDATE_BATCH_STATUS_LOCKED = "locked"
+CANDIDATE_BATCH_STATUS_AWAITING_RESULT = "awaiting_result"
+CANDIDATE_BATCH_STATUS_SETTLED = "settled"
+CANDIDATE_BATCH_STATUS_ARCHIVED = "archived"
+
+CANDIDATE_BATCH_FROZEN_FIELDS: tuple[str, ...] = (
+    "owner_id",
+    "target_issue",
+    "snapshot_id",
+    "strategy_version_id",
+    "seed_hex",
+    "rng_version",
+    "candidate_count",
+    "created_at",
+    "locked_at",
+    "lock_hash",
+)
+"""锁定后不可修改的候选核心字段；``note`` 与状态迁移不在此列。"""
+
+SETTLEMENT_FROZEN_FIELDS: tuple[str, ...] = (
+    "batch_id",
+    "draw_revision_id",
+    "result_json",
+    "summary_json",
+    "supersedes_id",
+    "created_at",
+)
+"""结算修订只允许切换 ``is_current``，内容字段一经写入不可覆盖。"""
+
+
+class RuleVersion(Base):
+    """彩种规则版本：同一彩种的生效期号区间不得重叠，内容不可覆盖。
+
+    ``content_json`` 存放规范化奖级规则（见 :mod:`dajidali.engine.rule_resolver`），
+    ``content_hash`` 是其 SHA-256；区间重叠由服务层校验，数据库只保证
+    ``(game, effective_from_issue)`` 唯一。
+    """
+
+    __tablename__ = "rule_version"
+    __table_args__ = (
+        UniqueConstraint("game", "effective_from_issue", name="uq_rule_version_game_from"),
+        Index("ix_rule_version_game_to", "game", "effective_to_issue"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    game: Mapped[str] = mapped_column(
+        String(16),
+        ForeignKey("lottery_game.code", name="fk_rule_version_game", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    effective_from_issue: Mapped[str] = mapped_column(String(32), nullable=False)
+    effective_to_issue: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    content_json: Mapped[str] = mapped_column(Text, nullable=False)
+    evidence_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, default=utc_now)
+
+
+class StrategyVersion(Base):
+    """策略版本：类型、参数与结构条件的规范化存档；``version_hash`` 唯一。"""
+
+    __tablename__ = "strategy_version"
+    __table_args__ = (
+        UniqueConstraint("version_hash", name="uq_strategy_version_hash"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    strategy_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    params_json: Mapped[str] = mapped_column(Text, nullable=False)
+    conditions_json: Mapped[str] = mapped_column(Text, nullable=False)
+    version_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, default=utc_now)
+
+
+class CandidateBatch(Base):
+    """候选批次：草稿可编辑，锁定后核心字段冻结（设计文档 10.1、10.2）。
+
+    ``revision`` 是草稿版本号，用于 ``expected_revision`` 乐观并发校验；它不复用
+    开奖修订号。锁定在单个事务中完成条件更新，并追加审计事件。
+    """
+
+    __tablename__ = "candidate_batch"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ({})".format(", ".join(repr(s) for s in CANDIDATE_BATCH_STATUSES)),
+            name="ck_candidate_batch_status",
+        ),
+        CheckConstraint("revision >= 1", name="ck_candidate_batch_revision_positive"),
+        CheckConstraint(
+            "candidate_count >= 1", name="ck_candidate_batch_candidate_count_positive"
+        ),
+        Index("ix_candidate_batch_owner_status", "owner_id", "status"),
+        Index("ix_candidate_batch_target_issue", "target_issue"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    owner_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("user.id", name="fk_candidate_batch_owner", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    target_issue: Mapped[str] = mapped_column(String(32), nullable=False)
+    snapshot_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey(
+            "dataset_snapshot.id",
+            name="fk_candidate_batch_snapshot",
+            ondelete="RESTRICT",
+        ),
+        nullable=False,
+    )
+    strategy_version_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey(
+            "strategy_version.id",
+            name="fk_candidate_batch_strategy_version",
+            ondelete="RESTRICT",
+        ),
+        nullable=False,
+    )
+    seed_hex: Mapped[str] = mapped_column(String(64), nullable=False)
+    rng_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    candidate_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default=CANDIDATE_BATCH_STATUS_DRAFT
+    )
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, default=utc_now)
+    locked_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+    lock_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    lines: Mapped[list[CandidateLine]] = relationship(
+        back_populates="batch",
+        order_by="CandidateLine.line_no",
+        lazy="selectin",
+    )
+
+
+class CandidateLine(Base):
+    """候选行：批内号码组合与行哈希；``(batch_id, line_no)`` 与行哈希均唯一。"""
+
+    __tablename__ = "candidate_line"
+    __table_args__ = (
+        UniqueConstraint("batch_id", "line_no", name="uq_candidate_line_batch_line_no"),
+        UniqueConstraint("batch_id", "line_hash", name="uq_candidate_line_batch_line_hash"),
+        CheckConstraint("line_no >= 1", name="ck_candidate_line_no_positive"),
+        CheckConstraint("blue >= 1 AND blue <= 16", name="ck_candidate_line_blue_range"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    batch_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey(
+            "candidate_batch.id", name="fk_candidate_line_batch", ondelete="CASCADE"
+        ),
+        nullable=False,
+    )
+    line_no: Mapped[int] = mapped_column(Integer, nullable=False)
+    reds_json: Mapped[str] = mapped_column(Text, nullable=False)
+    blue: Mapped[int] = mapped_column(Integer, nullable=False)
+    line_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    batch: Mapped[CandidateBatch] = relationship(back_populates="lines")
+
+
+class SettlementRevision(Base):
+    """结算修订：同批次同开奖修订只结算一次，开奖更正后追加并保留旧修订。"""
+
+    __tablename__ = "settlement_revision"
+    __table_args__ = (
+        UniqueConstraint(
+            "batch_id", "draw_revision_id", name="uq_settlement_revision_batch_draw"
+        ),
+        Index("ix_settlement_revision_batch_current", "batch_id", "is_current"),
+        Index("ix_settlement_revision_draw", "draw_revision_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    batch_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey(
+            "candidate_batch.id", name="fk_settlement_revision_batch", ondelete="CASCADE"
+        ),
+        nullable=False,
+    )
+    draw_revision_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey(
+            "draw_revision.id",
+            name="fk_settlement_revision_draw",
+            ondelete="RESTRICT",
+        ),
+        nullable=False,
+    )
+    result_json: Mapped[str] = mapped_column(Text, nullable=False)
+    summary_json: Mapped[str] = mapped_column(Text, nullable=False)
+    supersedes_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey(
+            "settlement_revision.id",
+            name="fk_settlement_revision_supersedes",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, default=utc_now)
+    is_current: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+
+class AuditEvent(Base):
+    """审计事件：只追加，``monotonic_seq`` 与自增主键同序，用于核对事件链顺序。"""
+
+    __tablename__ = "audit_event"
+    __table_args__ = (
+        UniqueConstraint("monotonic_seq", name="uq_audit_event_monotonic_seq"),
+        Index("ix_audit_event_entity", "entity_type", "entity_id"),
+        Index("ix_audit_event_occurred", "occurred_at_utc"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    event: Mapped[str] = mapped_column(String(64), nullable=False)
+    entity_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    entity_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    occurred_at_utc: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False)
+    # 插入时先留空、拿到自增主键后回填为同值，避免并发插入的占位值撞唯一约束。
+    monotonic_seq: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+
+# 规则与策略版本：内容一经写入不可覆盖，历史批次继续引用旧版本。
+for _version_model in (RuleVersion, StrategyVersion, CandidateLine):
+    event.listen(_version_model, "before_update", _reject_immutable_update)
+    event.listen(_version_model, "before_delete", _reject_immutable_delete)
+
+
+def _guard_locked_candidate_batch(mapper: Any, connection: Any, target: Any) -> None:
+    """锁定后拒绝修改候选核心字段（服务层之外的第二道保护）。
+
+    以数据库中的 ``locked_at`` 为准，因此锁定的条件更新本身不受影响，而之后任何
+    ORM 更新只要触碰核心字段就会被拒绝；备注与状态迁移仍允许。
+    """
+    if target.id is None:
+        return
+    persisted_locked_at = connection.execute(
+        select(CandidateBatch.locked_at).where(CandidateBatch.id == target.id)
+    ).scalar_one_or_none()
+    if persisted_locked_at is None:
+        return
+    state = inspect(target)
+    for field_name in CANDIDATE_BATCH_FROZEN_FIELDS:
+        if state.attrs[field_name].history.has_changes():
+            raise DomainError(
+                f"候选批次锁定后不可修改 {field_name}",
+                code="IMMUTABLE_ROW",
+                entity="CandidateBatch",
+                field=field_name,
+            )
+
+
+def _guard_locked_candidate_delete(mapper: Any, connection: Any, target: Any) -> None:
+    """已锁定的候选批次不可删除；放弃草稿请使用归档状态。"""
+    if target.locked_at is not None:
+        raise DomainError(
+            "已锁定的候选批次不可删除",
+            code="IMMUTABLE_ROW",
+            entity="CandidateBatch",
+        )
+
+
+def _guard_settlement_update(mapper: Any, connection: Any, target: Any) -> None:
+    """结算修订只允许翻转 ``is_current``，结果内容不可覆盖。"""
+    state = inspect(target)
+    for field_name in SETTLEMENT_FROZEN_FIELDS:
+        if state.attrs[field_name].history.has_changes():
+            raise DomainError(
+                f"结算修订不可修改 {field_name}",
+                code="IMMUTABLE_ROW",
+                entity="SettlementRevision",
+                field=field_name,
+            )
+
+
+event.listen(CandidateBatch, "before_update", _guard_locked_candidate_batch)
+event.listen(CandidateBatch, "before_delete", _guard_locked_candidate_delete)
+event.listen(SettlementRevision, "before_update", _guard_settlement_update)
+event.listen(SettlementRevision, "before_delete", _reject_immutable_delete)
