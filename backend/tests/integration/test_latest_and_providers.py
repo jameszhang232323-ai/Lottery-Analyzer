@@ -171,6 +171,58 @@ def test_draws_filter_by_date_range() -> None:
         assert [item["issue"] for item in between] == [ISSUES[1]]
 
 
+def test_draws_order_desc_returns_newest_first() -> None:
+    with _environment() as env:
+        first_page = env.analyst.get(
+            "/api/v1/draws", params={"order": "desc", "limit": 2}
+        ).json()
+        assert [item["issue"] for item in first_page["items"]] == [ISSUES[2], ISSUES[1]]
+        assert first_page["order"] == "desc"
+
+        cursor = first_page["next_cursor"]
+        assert cursor
+        second_page = env.analyst.get(
+            "/api/v1/draws", params={"order": "desc", "limit": 2, "cursor": cursor}
+        ).json()
+        assert [item["issue"] for item in second_page["items"]] == [ISSUES[0]]
+        assert second_page["next_cursor"] is None
+
+        bad = env.analyst.get("/api/v1/draws", params={"order": "sideways"})
+        assert bad.status_code == 422
+        assert bad.json()["code"] == "INVALID_ORDER"
+
+
+def test_issue_observations_endpoint() -> None:
+    with _environment() as env:
+        with env.factory() as session:
+            from datetime import UTC, datetime
+
+            from dajidali.data.models import SourceObservation
+
+            session.add(
+                SourceObservation(
+                    game="ssq",
+                    issue=ISSUES[-1],
+                    source="recorded",
+                    retrieved_at=datetime(2025, 1, 3, tzinfo=UTC),
+                    payload_hash="a" * 64,
+                    raw_payload='{"numbers": []}',
+                )
+            )
+            session.commit()
+
+        response = env.analyst.get(f"/api/v1/draws/ssq/{ISSUES[-1]}/observations")
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["count"] == 1
+        item = body["items"][0]
+        assert item["source"] == "recorded"
+        assert item["has_payload"] is True
+        assert "raw_payload" not in item
+
+        assert env.analyst.get("/api/v1/draws/ssq/2099001/observations").status_code == 404
+
+
 def test_draws_reject_invalid_date() -> None:
     with _environment() as env:
         bad = env.analyst.get("/api/v1/draws", params={"start_date": "2025/01/02"})

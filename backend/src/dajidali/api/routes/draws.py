@@ -25,6 +25,7 @@ from dajidali.api.deps import AuthenticatedUser, DbSession
 from dajidali.data.models import (
     DrawCalendar,
     DrawCurrent,
+    SourceObservation,
     User,
     decode_numbers,
     require_game,
@@ -192,6 +193,7 @@ def list_draws(
     end_issue: str | None = None,
     start_date: str | None = None,
     end_date: str | None = None,
+    order: str = "asc",
     limit: int = DEFAULT_PAGE_LIMIT,
     cursor: str | None = None,
     user: User = AuthenticatedUser,
@@ -199,10 +201,17 @@ def list_draws(
 ) -> dict[str, Any]:
     """分页读取当前修订；``cursor`` 是上一页最后一期的稳定游标。
 
-    期号区间与日期区间可同时使用（取交集）；日期按开奖日期（中国本地日期）比较。
+    期号区间与日期区间可同时使用（取交集）；``order=desc`` 从最新一期向前翻页。
     """
     del user  # 依赖已证明登录；公共开奖数据不按用户过滤
     require_game(db, game)
+    if order not in {"asc", "desc"}:
+        raise DrawApiError(
+            "order 只能是 asc 或 desc",
+            code="INVALID_ORDER",
+            order=order,
+        )
+    descending = order == "desc"
     _validate_range(start_issue, end_issue)
     date_from, date_to = _validate_dates(start_date, end_date)
     if isinstance(limit, bool) or limit < 1 or limit > MAX_PAGE_LIMIT:
@@ -214,8 +223,11 @@ def list_draws(
     after = _decode_cursor(cursor) if cursor else None
     after_key = issue_sort_key(after) if after is not None else None
     rows = _current_rows(db, game, start_issue, end_issue, date_from, date_to)
+    if descending:
+        rows = list(reversed(rows))
     if after_key is not None:
-        rows = [item for item in rows if issue_sort_key(item[0].issue) > after_key]
+        comparator = (lambda key: key < after_key) if descending else (lambda key: key > after_key)
+        rows = [item for item in rows if comparator(issue_sort_key(item[0].issue))]
     page = rows[:limit]
     has_more = len(rows) > limit
     return {
@@ -225,8 +237,14 @@ def list_draws(
             for row, status in page
         ],
         "limit": limit,
+        "order": order,
         "next_cursor": _encode_cursor(page[-1][0].issue) if has_more and page else None,
-        "range": {"start_issue": start_issue, "end_issue": end_issue},
+        "range": {
+            "start_issue": start_issue,
+            "end_issue": end_issue,
+            "start_date": start_date,
+            "end_date": end_date,
+        },
     }
 
 
@@ -289,6 +307,51 @@ def read_draw(
         "draw": current_payload,
         "revisions": revisions,
         "current_status": current_status,
+    }
+
+
+@router.get("/draws/{game}/{issue}/observations")
+def read_issue_observations(
+    game: str,
+    issue: str,
+    user: User = AuthenticatedUser,
+    db: Session = DbSession,
+) -> dict[str, Any]:
+    """某期的来源原始观察（只返回元数据，不回传原始载荷）。
+
+    观察是修订的证据来源：同一期可能来自多个来源或多次抓取，冲突时保留全部记录。
+    """
+    del user
+    require_game(db, game)
+    validate_issue(issue)
+    rows = list(
+        db.scalars(
+            select(SourceObservation)
+            .where(
+                SourceObservation.game == game,
+                SourceObservation.issue == issue,
+            )
+            .order_by(SourceObservation.id)
+        )
+    )
+    if not rows:
+        raise NotFoundError(NOT_FOUND_MESSAGE)
+    return {
+        "game": game,
+        "issue": issue,
+        "items": [
+            {
+                "id": row.id,
+                "source": row.source,
+                "source_url": row.source_url,
+                "retrieved_at": row.retrieved_at.isoformat() if row.retrieved_at else None,
+                "payload_hash": row.payload_hash,
+                "has_payload": row.raw_payload is not None,
+                "raw_ref": row.raw_ref,
+            }
+            for row in rows
+        ],
+        "count": len(rows),
     }
 
 
