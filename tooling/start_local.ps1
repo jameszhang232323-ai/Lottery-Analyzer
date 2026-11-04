@@ -18,16 +18,14 @@ $ErrorActionPreference = 'Stop'
 function Test-PortInUse {
     param([int]$PortNumber)
 
-    $cmd = Get-Command Get-NetTCPConnection -ErrorAction SilentlyContinue
-    if ($null -ne $cmd) {
-        $connections = Get-NetTCPConnection -LocalPort $PortNumber -State Listen -ErrorAction SilentlyContinue
-        return ($null -ne $connections)
-    }
-
-    # 旧版 Windows 没有 Get-NetTCPConnection 时的回退；只用于本机 loopback。
+    # 先用 TCP 连接探测：比 Get-NetTCPConnection 更可靠（后者在某些受限会话里
+    # 会返回空结果，导致端口占用被误判为空闲）。只探测 loopback，300ms 超时。
     $client = New-Object System.Net.Sockets.TcpClient
     try {
-        $client.Connect('127.0.0.1', $PortNumber)
+        $async = $client.BeginConnect('127.0.0.1', $PortNumber, $null, $null)
+        $completed = $async.AsyncWaitHandle.WaitOne(300)
+        if (-not $completed) { return $false }
+        $client.EndConnect($async)
         return $true
     }
     catch {
