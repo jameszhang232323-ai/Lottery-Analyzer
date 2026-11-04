@@ -13,11 +13,11 @@ if errorlevel 1 (
     echo 常见问题:
     echo   1. backend\.venv 不存在 - 先执行 python -m venv backend\.venv
     echo   2. web\dist 不存在 - 先在 web 目录执行 pnpm build
-    echo   3. 8000 端口被占用 - 关闭占用程序后重试
+    echo   3. 其他错误 - 查看 backend\data\logs 下的日志
     pause
 ) else (
     echo.
-    echo 服务已启动: http://127.0.0.1:8000/
+    echo 服务已启动，地址见上方 “界面:” 一行，默认 8000 端口。
     echo 停止服务: 双击 停止服务.bat
     echo 本窗口可以关闭，服务在后台继续运行。
     ping -n 6 127.0.0.1 >nul

@@ -18,21 +18,29 @@ $ErrorActionPreference = 'Stop'
 function Test-PortInUse {
     param([int]$PortNumber)
 
-    # 先用 TCP 连接探测：比 Get-NetTCPConnection 更可靠（后者在某些受限会话里
-    # 会返回空结果，导致端口占用被误判为空闲）。只探测 loopback，300ms 超时。
-    $client = New-Object System.Net.Sockets.TcpClient
+    # 用 netstat 判断是否有进程在监听该端口（本机各权限上下文都能看到）。
+    # 比 TCP 连接探测可靠：空闲端口在某些环境下连接不会立刻被拒绝。
     try {
-        $async = $client.BeginConnect('127.0.0.1', $PortNumber, $null, $null)
-        $completed = $async.AsyncWaitHandle.WaitOne(300)
-        if (-not $completed) { return $false }
-        $client.EndConnect($async)
-        return $true
-    }
-    catch {
+        $escaped = [regex]::Escape(":$PortNumber")
+        $hits = netstat -ano -p TCP | Select-String -Pattern "$escaped\s+\S+\s+LISTENING"
+        if ($null -ne $hits) { return $true }
         return $false
     }
-    finally {
-        $client.Close()
+    catch {
+        # netstat 不可用时退回 TCP 连接探测
+        $client = New-Object System.Net.Sockets.TcpClient
+        try {
+            $async = $client.BeginConnect('127.0.0.1', $PortNumber, $null, $null)
+            if (-not $async.AsyncWaitHandle.WaitOne(400)) { return $false }
+            $client.EndConnect($async)
+            return $true
+        }
+        catch {
+            return $false
+        }
+        finally {
+            $client.Close()
+        }
     }
 }
 
@@ -132,7 +140,30 @@ foreach ($name in @('api', 'worker', 'scheduler')) {
 }
 
 if (Test-PortInUse -PortNumber $Port) {
-    throw "端口 $Port 已被占用。请关闭占用该端口的进程，或使用 -Port 指定其他端口。"
+    # 端口被占用时自动改用后续空闲端口，避免用户手工排查残留进程。
+    $occupiedPort = $Port
+    $ownerPid = $null
+    try {
+        $line = netstat -ano | Select-String ":$occupiedPort\s+.*LISTENING" | Select-Object -First 1
+        if ($line) { $ownerPid = ($line.ToString() -split '\s+')[-1] }
+    }
+    catch { }
+
+    $fallback = $null
+    for ($offset = 1; $offset -le 20; $offset++) {
+        $candidate = $occupiedPort + $offset
+        if ($candidate -gt 65535) { break }
+        if (-not (Test-PortInUse -PortNumber $candidate)) {
+            $fallback = $candidate
+            break
+        }
+    }
+    if ($null -eq $fallback) {
+        throw "端口 $occupiedPort 及后续 20 个端口都被占用。请关闭占用端口的程序，或用 -Port 指定其他端口。"
+    }
+    $hint = if ($ownerPid) { "（占用进程 PID $ownerPid，可用 taskkill /PID $ownerPid /F 结束）" } else { '' }
+    Write-Warning "端口 $occupiedPort 已被占用$hint，自动改用 $fallback。"
+    $Port = $fallback
 }
 
 Write-Host '== 执行数据库迁移（每次启动只执行一次） =='
