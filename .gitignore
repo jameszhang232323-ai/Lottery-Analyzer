@@ -38,6 +38,8 @@ npm-debug.log*
 /data/
 /artifacts/
 /backups/
+# 本机默认数据目录（数据库、日志、PID、主密钥）整体忽略
+/backend/data/
 *.db
 *.db-wal
 *.db-shm

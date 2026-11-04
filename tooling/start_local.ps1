@@ -150,6 +150,38 @@ finally {
 }
 
 $env:DAJIDALI_DATA_DIR = $DataDir
+
+# 数据源：未显式配置时默认使用内置录制源，保证界面“同步数据”开箱可用。
+# 真实供应商未准入，录制源只提供合成样例，报告中会标注 synthetic。
+if ([string]::IsNullOrWhiteSpace($env:DAJIDALI_SOURCE)) {
+    $env:DAJIDALI_SOURCE = 'recorded'
+    Write-Host '数据源：recorded（内置合成样例；真实来源需单独准入）'
+}
+
+# 主密钥：未设置时自动生成并保存在数据目录，供“软件内保存 AI 凭证”使用。
+# 主密钥不落库、不进备份；丢失后已保存的凭证无法解密，需要重新填写。
+if ([string]::IsNullOrWhiteSpace($env:DAJIDALI_MASTER_KEY)) {
+    $keyFile = Join-Path $DataDir 'master.key'
+    if (Test-Path -LiteralPath $keyFile) {
+        $env:DAJIDALI_MASTER_KEY = (Get-Content -LiteralPath $keyFile -Raw).Trim()
+        Write-Host "主密钥：已从 $keyFile 读取"
+    }
+    else {
+        $generated = & $py -c "import base64,os;print(base64.b64encode(os.urandom(32)).decode())"
+        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($generated)) {
+            Write-Warning '无法生成主密钥；本次启动将无法在软件内保存 AI 凭证。'
+        }
+        else {
+            $env:DAJIDALI_MASTER_KEY = ([string]$generated).Trim()
+            Set-Content -LiteralPath $keyFile -Value $env:DAJIDALI_MASTER_KEY -Encoding Ascii -NoNewline
+            Write-Host "主密钥：已生成并保存到 $keyFile（请勿提交或泄露）"
+        }
+    }
+}
+else {
+    Write-Host '主密钥：使用环境变量 DAJIDALI_MASTER_KEY'
+}
+
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $started = @()
 

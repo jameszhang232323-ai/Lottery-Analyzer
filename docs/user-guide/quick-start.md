@@ -95,13 +95,14 @@ powershell -ExecutionPolicy Bypass -File tooling\stop_local.ps1
 
 登录管理员账号后，进入 **设置与任务 → 数据源与 AI 状态**：
 
-1. 首次使用前，部署者需要设置一次主密钥（用于加密数据库中的凭证）：
+1. **主密钥**：`启动服务.bat` / `start_local.ps1` 首次运行时会**自动生成**
+   `backend\data\master.key` 并注入进程，无需手工配置。若想自己指定：
 
    ```powershell
-   $env:DAJIDALI_MASTER_KEY = python -c "import base64,os;print(base64.b64encode(os.urandom(32)).decode())"
+   $env:DAJIDALI_MASTER_KEY = "<32 字节 base64>"
    ```
 
-   主密钥不落库、不入备份；丢失后已保存的凭证无法解密，需要重新填写。
+   主密钥不落库、不进备份；丢失后已保存的凭证无法解密，需要重新填写。
 
 2. 在表单里填写 **API 地址、模型名、API Key**，点「保存 AI 凭证」。
    凭证以 AES-256-GCM 加密写入数据库，界面只显示掩码（如 `sk-****mnop`）。
@@ -111,6 +112,9 @@ powershell -ExecutionPolicy Bypass -File tooling\stop_local.ps1
 
 > 环境变量仍受支持且**优先级更高**（`DAJIDALI_AI_BASE_URL` / `DAJIDALI_AI_MODEL` /
 > `DAJIDALI_AI_API_KEY`）。两者都配置时以环境变量为准。
+>
+> 数据源同理：启动脚本在未设置 `DAJIDALI_SOURCE` 时默认 `recorded`（合成样例），
+> 保证界面“同步数据”开箱可用；真实供应商需单独准入后才能替换。
 
 ## 6. 查看状态与日志
 
