@@ -285,6 +285,23 @@ export function apiPost<T>(path: string, body?: unknown, init: RequestInit = {})
   })
 }
 
+/** PUT 请求，路径相对 `/api/v1`；非安全方法自动附带 CSRF 令牌。 */
+export function apiPut<T>(path: string, body?: unknown, init: RequestInit = {}): Promise<T> {
+  const headers = new Headers(init.headers)
+  if (body !== undefined) headers.set('Content-Type', 'application/json')
+  return request<T>(path, {
+    ...init,
+    method: 'PUT',
+    headers,
+    body: body === undefined ? init.body : JSON.stringify(body),
+  })
+}
+
+/** DELETE 请求，路径相对 `/api/v1`；非安全方法自动附带 CSRF 令牌。 */
+export function apiDelete<T>(path: string, init: RequestInit = {}): Promise<T> {
+  return request<T>(path, { ...init, method: 'DELETE' })
+}
+
 /** 附件下载：用同源 fetch 携带会话 Cookie，不把令牌放进 URL。 */
 export async function apiDownload(
   path: string,

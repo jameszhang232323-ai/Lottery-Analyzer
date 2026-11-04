@@ -25,6 +25,11 @@ from dajidali.security.bootstrap import normalize_username
 from dajidali.security.passwords import hash_password
 from dajidali.security.secrets import seal
 from dajidali.security.sessions import revoke_user_sessions
+from dajidali.services.ai.provider_store import (
+    delete_ai_provider_config,
+    load_ai_provider_config,
+    save_ai_provider_config,
+)
 from dajidali.services.ai.runtime import (
     AI_API_KEY_ENV,
     AI_BASE_URL_ENV,
@@ -46,16 +51,29 @@ def _masked_key(value: str) -> str | None:
 
 
 @router.get("/providers")
-def list_providers(user: User = AdminUser) -> dict[str, Any]:
+def list_providers(user: User = AdminUser, db: Session = DbSession) -> dict[str, Any]:
     """来源与 AI 的配置状态（管理员）。
 
-    只返回“是否配置”、模型名、地址与密钥掩码；绝不返回密钥本身，
-    也不做任何网络探测——真实连通性验收需要凭证，属 W6 事项。
+    优先级：环境变量 > 数据库。只返回“是否配置”、模型名、地址与密钥掩码；
+    绝不返回密钥本身，也不做任何网络探测。
     """
     del user
     env = os.environ
-    configured = ai_configured()
+    env_configured = ai_configured()
     key = (env.get(AI_API_KEY_ENV) or "").strip()
+
+    # 数据库凭证作为回退
+    db_config = None
+    if not env_configured:
+        db_config = load_ai_provider_config(db)
+
+    configured = env_configured or db_config is not None
+    model = (env.get(AI_MODEL_ENV) or "").strip() or (db_config or {}).get("model")
+    base_url = (env.get(AI_BASE_URL_ENV) or "").strip() or (db_config or {}).get("base_url")
+    masked = _masked_key(key)
+    if masked is None and db_config is not None:
+        masked = _masked_key(str(db_config.get("api_key", "")))
+
     source = source_from_env()
     return {
         "items": [
@@ -63,14 +81,15 @@ def list_providers(user: User = AdminUser) -> dict[str, Any]:
                 "id": "ai",
                 "kind": "ai",
                 "configured": configured,
+                "source": "env" if env_configured else ("db" if db_config else None),
                 "provider": "openai-compatible" if configured else None,
-                "model": (env.get(AI_MODEL_ENV) or "").strip() or None,
-                "base_url": (env.get(AI_BASE_URL_ENV) or "").strip() or None,
-                "masked_key": _masked_key(key),
+                "model": model,
+                "base_url": base_url,
+                "masked_key": masked,
                 "note": (
                     None
                     if configured
-                    else "未配置 AI 凭证；AI 任务会以 AI_NOT_CONFIGURED 失败"
+                    else "未配置 AI 凭证；可在下方表单保存，或设置环境变量"
                 ),
             },
             {
@@ -87,6 +106,47 @@ def list_providers(user: User = AdminUser) -> dict[str, Any]:
             },
         ]
     }
+
+
+class AiProviderConfigRequest(BaseModel):
+    """保存 AI 凭证；密钥只存在数据库密文中，不写日志不回显。"""
+
+    base_url: str = Field(min_length=8, max_length=512)
+    model: str = Field(min_length=1, max_length=128)
+    api_key: str = Field(min_length=1, max_length=4096)
+    timeout_seconds: float | None = Field(default=None, gt=0, le=300)
+    max_output_tokens: int | None = Field(default=None, ge=1, le=32768)
+
+
+@router.put("/providers/ai")
+def update_ai_provider(
+    payload: AiProviderConfigRequest,
+    user: User = AdminUser,
+    db: Session = DbSession,
+) -> dict[str, Any]:
+    """保存 AI 凭证（加密落库）；需先设置 ``DAJIDALI_MASTER_KEY`` 环境变量。"""
+    del user
+    result = save_ai_provider_config(
+        db,
+        base_url=payload.base_url,
+        model=payload.model,
+        api_key=payload.api_key,
+        timeout_seconds=payload.timeout_seconds,
+        max_output_tokens=payload.max_output_tokens,
+    )
+    result["note"] = "已保存；重启 worker 后生效"
+    return result
+
+
+@router.delete("/providers/ai")
+def delete_ai_provider(
+    user: User = AdminUser,
+    db: Session = DbSession,
+) -> dict[str, Any]:
+    """删除数据库中保存的 AI 凭证。"""
+    del user
+    deleted = delete_ai_provider_config(db)
+    return {"deleted": deleted}
 
 
 class InvalidRoleError(DomainError):

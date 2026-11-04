@@ -2,9 +2,11 @@
 import { computed, onMounted, ref } from 'vue'
 
 import {
+  apiDelete,
   apiDownload,
   apiGet,
   apiPost,
+  apiPut,
   clientError,
   toApiError,
   type ApiError,
@@ -70,6 +72,13 @@ const secretsError = ref<ApiError | null>(null)
 const providers = ref<ProviderStatus[]>([])
 const providersLoading = ref(false)
 const providersError = ref<ApiError | null>(null)
+
+const aiBaseUrl = ref('')
+const aiModel = ref('')
+const aiApiKey = ref('')
+const aiSaveLoading = ref(false)
+const aiSaveError = ref<ApiError | null>(null)
+const aiSaveNotice = ref('')
 
 const backup = ref<Backup | null>(null)
 const backupLoading = ref(false)
@@ -216,6 +225,44 @@ function providerDetail(item: ProviderStatus): string {
     return parts.join(' · ') || '—'
   }
   return item.name ? `${item.name}${item.license_verified ? '（已准入）' : '（未准入）'}` : '—'
+}
+
+async function saveAiProvider(): Promise<void> {
+  aiSaveError.value = null
+  aiSaveNotice.value = ''
+  aiSaveLoading.value = true
+  try {
+    const payload = await apiPut<{ configured: boolean; model: string; masked_key: string; note?: string }>(
+      '/admin/providers/ai',
+      {
+        base_url: aiBaseUrl.value.trim(),
+        model: aiModel.value.trim(),
+        api_key: aiApiKey.value.trim(),
+      },
+    )
+    aiSaveNotice.value = `已保存 ${payload.model}（${payload.masked_key}）；重启 worker 后生效`
+    aiApiKey.value = ''
+    await loadProviders()
+  } catch (caught) {
+    aiSaveError.value = toApiError(caught)
+  } finally {
+    aiSaveLoading.value = false
+  }
+}
+
+async function deleteAiProvider(): Promise<void> {
+  aiSaveError.value = null
+  aiSaveNotice.value = ''
+  aiSaveLoading.value = true
+  try {
+    const payload = await apiDelete<{ deleted: boolean }>('/admin/providers/ai')
+    aiSaveNotice.value = payload.deleted ? '已删除保存的 AI 凭证' : '数据库中没有保存的凭证'
+    await loadProviders()
+  } catch (caught) {
+    aiSaveError.value = toApiError(caught)
+  } finally {
+    aiSaveLoading.value = false
+  }
 }
 
 async function createBackup(): Promise<void> {
@@ -390,6 +437,67 @@ onMounted(() => {
             </tbody>
           </table>
         </div>
+
+        <!-- AI 凭证表单：加密保存到数据库，需先设置 DAJIDALI_MASTER_KEY -->
+        <div class="filter-grid">
+          <label class="field">
+            <span class="field-label">API 地址（base_url）</span>
+            <input
+              v-model="aiBaseUrl"
+              class="field-input"
+              type="url"
+              placeholder="https://api.openai.com/v1"
+              autocomplete="off"
+            />
+          </label>
+          <label class="field">
+            <span class="field-label">模型名</span>
+            <input
+              v-model="aiModel"
+              class="field-input"
+              type="text"
+              placeholder="例如 gpt-4o-mini"
+              autocomplete="off"
+            />
+          </label>
+          <label class="field">
+            <span class="field-label">API Key</span>
+            <input
+              v-model="aiApiKey"
+              class="field-input"
+              type="password"
+              placeholder="sk-..."
+              autocomplete="new-password"
+            />
+          </label>
+        </div>
+        <p v-if="aiSaveLoading" class="loading-note">正在保存 AI 凭证…</p>
+        <p v-if="aiSaveNotice" class="ok-text">{{ aiSaveNotice }}</p>
+        <ErrorNote :error="aiSaveError" context="保存 AI 凭证" />
+        <p class="muted">
+          凭证加密保存在数据库中（AES-256-GCM），不写日志不回显；需先在服务器上设置
+          <code>DAJIDALI_MASTER_KEY</code> 环境变量。保存后重启 worker 生效。
+        </p>
+        <template #actions>
+          <div class="action-row">
+            <button
+              type="button"
+              class="action-button"
+              :disabled="aiSaveLoading || !aiBaseUrl.trim() || !aiModel.trim() || !aiApiKey.trim()"
+              @click="saveAiProvider"
+            >
+              {{ aiSaveLoading ? '保存中…' : '保存 AI 凭证' }}
+            </button>
+            <button
+              type="button"
+              class="ghost-button"
+              :disabled="aiSaveLoading"
+              @click="deleteAiProvider"
+            >
+              删除已保存凭证
+            </button>
+          </div>
+        </template>
       </SectionCard>
 
       <SectionCard title="用户管理" description="GET/POST /admin/users；禁用会撤销会话" wide>

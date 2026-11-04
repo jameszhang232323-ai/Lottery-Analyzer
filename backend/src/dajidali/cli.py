@@ -342,7 +342,8 @@ def _register_builtin_handlers(
     """把内置业务处理器注册到当前 worker 进程，返回已注册的 kind 列表。
 
     - ``analysis.run`` / ``candidate.generate`` / ``backtest.run``：总是注册；
-    - ``ai.analyze``：AI 凭证齐全时注册，否则相关任务明确失败为 ``AI_NOT_CONFIGURED``；
+    - ``ai.analyze``：AI 凭证齐全时注册（环境变量优先，数据库密文回退），
+      否则相关任务明确失败为 ``AI_NOT_CONFIGURED``；
     - ``sync.run``：来源已配置时注册（当前仅 ``DAJIDALI_SOURCE=recorded``）。
     """
     registered: list[str] = []
@@ -359,11 +360,22 @@ def _register_builtin_handlers(
     from dajidali.services.ai.runtime import provider_from_env
 
     provider = provider_from_env(environ)
+    provider_source = "环境变量"
+
+    # 环境变量未配置时，尝试从数据库读取加密保存的 AI 凭证
+    if provider is None:
+        from dajidali.services.ai.provider_store import provider_from_db
+
+        with factory() as session:
+            provider = provider_from_db(session)
+        if provider is not None:
+            provider_source = "数据库"
+
     if provider is not None:
         from dajidali.api.routes.ai_jobs import register_ai_handler
 
         register_ai_handler(factory, provider)
-        registered.append("ai.analyze")
+        registered.append(f"ai.analyze（来源={provider_source}）")
 
     from dajidali.services.sync import register_handlers as register_sync
     from dajidali.services.sync import source_from_env

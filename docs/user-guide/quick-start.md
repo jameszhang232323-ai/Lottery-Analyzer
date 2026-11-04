@@ -89,7 +89,30 @@ powershell -ExecutionPolicy Bypass -File tooling\stop_local.ps1
 脚本按 PID 停止 API、worker、scheduler 并清理 PID 文件；进程已经不存在时只提示并
 清理旧 PID 文件，不会因此报错。
 
-## 5. 查看状态与日志
+> 也可以直接双击项目根目录的 `启动服务.bat` / `停止服务.bat`，效果相同。
+
+## 5. 在软件内配置 AI 凭证（推荐）
+
+登录管理员账号后，进入 **设置与任务 → 数据源与 AI 状态**：
+
+1. 首次使用前，部署者需要设置一次主密钥（用于加密数据库中的凭证）：
+
+   ```powershell
+   $env:DAJIDALI_MASTER_KEY = python -c "import base64,os;print(base64.b64encode(os.urandom(32)).decode())"
+   ```
+
+   主密钥不落库、不入备份；丢失后已保存的凭证无法解密，需要重新填写。
+
+2. 在表单里填写 **API 地址、模型名、API Key**，点「保存 AI 凭证」。
+   凭证以 AES-256-GCM 加密写入数据库，界面只显示掩码（如 `sk-****mnop`）。
+3. **重启 worker**（`stop_local.ps1` → `start_local.ps1`）后生效；启动日志会显示
+   `已注册内置处理器：ai.analyze（来源=数据库）`。
+4. 需要更换或删除时，用同一卡片上的「删除已保存凭证」按钮。
+
+> 环境变量仍受支持且**优先级更高**（`DAJIDALI_AI_BASE_URL` / `DAJIDALI_AI_MODEL` /
+> `DAJIDALI_AI_API_KEY`）。两者都配置时以环境变量为准。
+
+## 6. 查看状态与日志
 
 - 健康探针：`http://127.0.0.1:8000/api/v1/health/ready`
 - 存活探针：`http://127.0.0.1:8000/api/v1/health/live`
@@ -103,7 +126,7 @@ powershell -ExecutionPolicy Bypass -File tooling\verify.ps1
 
 `verify.ps1` 会调用现有 `tooling\check.ps1`，耗时较长；健康探针失败会给出非零退出码。
 
-## 6. 常见提示
+## 7. 常见提示
 
 | 提示 | 含义与处理 |
 |---|---|
@@ -114,7 +137,7 @@ powershell -ExecutionPolicy Bypass -File tooling\verify.ps1
 | API 未在 60 秒内就绪 | 查看 api 的 `.err.log`，确认端口、数据库路径和依赖；脚本会停止本次已启动的进程 |
 | 登录请求成功但页面仍未登录 | 若设置了 `DAJIDALI_HTTPS=1` 却用 `http://` 访问，Secure Cookie 不会发送；本机 HTTP 应设为 0 |
 
-## 7. 未验证项
+## 8. 未验证项
 
 以下项目**没有在本次开发环境中真实执行**，不能据此宣称本机交付已验收：
 

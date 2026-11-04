@@ -43,6 +43,17 @@ backend\.venv\Scripts\python.exe -m ruff check backend/src backend/tests
 
 健康检查：`GET /api/v1/health/live`、`GET /api/v1/health/ready`。
 
+### 一键启停（Windows）
+
+双击项目根目录的 **`启动服务.bat`** 即可（自动检查环境、迁移、启动 API/worker/scheduler 并打开浏览器）；
+**`停止服务.bat`** 用于停止全部本机进程。
+
+```powershell
+# 命令行等价形式
+powershell -ExecutionPolicy Bypass -File tooling/start_local.ps1 -OpenBrowser
+powershell -ExecutionPolicy Bypass -File tooling/stop_local.ps1
+```
+
 > 在 DSH 的 Windows 沙箱里工作？先运行一次 `powershell -ExecutionPolicy Bypass -File tooling/setup-windows-sandbox.ps1`，
 > 它会修好 Python 临时目录和 Git TLS 两个本机限制；完整说明见[环境验收记录](docs/acceptance/2026-11-02-g0-environment.md)。
 

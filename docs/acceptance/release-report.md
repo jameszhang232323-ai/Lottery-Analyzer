@@ -10,7 +10,7 @@
 | 项 | 结果 | 命令 |
 |---|---|---|
 | 后端静态检查 | 通过 | `backend/.venv/Scripts/python.exe -m ruff check src tests` |
-| 后端测试 | **656 passed, 2 skipped** | `.venv\Scripts\python.exe -m pytest` |
+| 后端测试 | **663 passed, 2 skipped** | `.venv\Scripts\python.exe -m pytest` |
 | 前端类型检查 | 通过 | `node <node> <pnpm> typecheck` |
 | 前端构建 | 通过（主包 252 kB / gzip 83 kB，ECharts 分块） | `... build` |
 | 前端单元测试 | **85 passed** | `... test:unit` |
@@ -65,7 +65,8 @@
 
 1. 队列与并发：等待限额（全局 50、每用户 3）与按类型并发上限（每来源 1 个采集、1 个回测、1 个 AI）
    已实现；worker 领取时按运行中数量跳过，限额释放后可继续领取。
-2. 来源与 AI 的配置**写入**：已有 `GET /admin/providers` 状态查询；仍无 `PUT /admin/providers/{id}` 与连接测试 `POST /admin/providers/{id}/test`。
+2. 来源与 AI 的配置写入：AI 凭证已支持在软件内设置（`PUT /DELETE /admin/providers/ai`，AES-256-GCM
+   加密落库，worker 启动时环境变量优先、数据库回退）；仍无 `POST /admin/providers/{id}/test` 连接测试。
 3. 结算已提供服务层入口与管理员触发接口（`POST /admin/settlements/reconcile`，幂等）；
    仍缺自动触发（开奖修订发布后由采集流程调用）。
 4. 开奖数据与回测结果导出（CSV/JSON）均已实现并接入前端；仍缺日志与费用查询接口。
